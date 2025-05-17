@@ -1,52 +1,41 @@
-"use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
+import { config } from "dotenv";
+config();
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+async function main() {
+    const { default: fetch } = await import("node-fetch");
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${GROQ_API_KEY}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            model: "llama3-8b-8192",
+            messages: [
+                {
+                    role: "system",
+                    content: "You are a helpful assistant that writes clean and bug-free code.",
+                },
+                {
+                    role: "user",
+                    content: "Write the code for a TODO application",
+                },
+                {
+                    role: "user",
+                    content: "Fix all the errors that could possibly come.",
+                },
+            ],
+        }),
     });
-};
-var __asyncValues = (this && this.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-require("dotenv").config();
-const generative_ai_1 = require("@google/generative-ai");
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const ai = new generative_ai_1.GoogleGenerativeAI(GEMINI_API_KEY);
-function main() {
-    return __awaiter(this, void 0, void 0, function* () {
-        var _a, e_1, _b, _c;
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const chat = model.startChat({
-            history: [
-                { role: "user", parts: [{ text: "Write the code for a TODO application" }] }
-            ]
-        });
-        const result = yield chat.sendMessageStream("Write the code fixing all the errors that could possibly come.");
-        try {
-            for (var _d = true, _e = __asyncValues(result.stream), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
-                _c = _f.value;
-                _d = false;
-                const chunk = _c;
-                process.stdout.write(chunk.text());
-            }
-        }
-        catch (e_1_1) { e_1 = { error: e_1_1 }; }
-        finally {
-            try {
-                if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-            }
-            finally { if (e_1) throw e_1.error; }
-        }
-        //   const response = await result.response;
-        console.log();
-    });
+    if (!response.ok) {
+        console.error(`Error ${response.status}: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error(errorText);
+        return;
+    }
+    const data = (await response.json());
+    const message = data.choices?.[0]?.message?.content;
+    console.log("Response from GROQ:");
+    console.log(message);
 }
 main();
