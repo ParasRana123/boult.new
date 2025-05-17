@@ -18,9 +18,6 @@ async function main() {
   for await (const chunk of result.stream) {
     process.stdout.write(chunk.text());
   }
-//   const response = await result.response;
-  
-
   console.log();
 }
 
