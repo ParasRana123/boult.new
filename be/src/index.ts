@@ -1,15 +1,9 @@
 import { config } from "dotenv";
+import { Readable } from "stream";
+
 config();
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
-
-type GroqResponse = {
-  choices: {
-    message: {
-      content: string;
-    };
-  }[];
-};
 
 async function main() {
   const { default: fetch } = await import("node-fetch");
@@ -22,6 +16,7 @@ async function main() {
     },
     body: JSON.stringify({
       model: "llama3-8b-8192",
+      stream: true,
       messages: [
         {
           role: "system",
@@ -39,18 +34,50 @@ async function main() {
     }),
   });
 
-  if (!response.ok) {
+  if (!response.ok || !response.body) {
     console.error(`Error ${response.status}: ${response.statusText}`);
     const errorText = await response.text();
     console.error(errorText);
     return;
   }
 
-  const data = (await response.json()) as GroqResponse;
-  const message = data.choices?.[0]?.message?.content;
+  console.log("Streaming response from GROQ:\n");
 
-  console.log("Response from GROQ:");
-  console.log(message);
+  let buffer = "";
+
+  const body = response.body as Readable;
+
+  for await (const chunk of body) {
+    buffer += chunk.toString("utf-8");
+
+    const lines = buffer.split("\n").filter(line => line.trim() !== "");
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        const jsonStr = line.replace(/^data:\s*/, "");
+        if (jsonStr === "[DONE]") {
+          console.log("\n[Stream complete]");
+          body.destroy();
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content;
+          if (content) {
+            await new Promise(resolve => setTimeout(resolve, 50)); // ⏱️ Add delay here
+            process.stdout.write(content);
+          }
+        } catch (err) {
+          console.error("Error parsing JSON chunk:", err);
+        }
+      }
+    }
+
+    buffer = lines[lines.length - 1]?.endsWith("}") ? "" : lines[lines.length - 1];
+  }
+
+  console.log("\n[Stream ended]");
 }
 
 main();
