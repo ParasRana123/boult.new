@@ -10,14 +10,18 @@ async function main() {
 
   const chat = model.startChat({
     history: [
-      { role: "user", parts: [{ text: "What is Machine Learning" }] }
+      { role: "user", parts: [{ text: "Write the code for a TODO application" }] }
     ]
   });
 
-  const result = await chat.sendMessage("Summarize everything in one sentence.");
-  const response = await result.response;
+  const result = await chat.sendMessageStream("Write the code fixing all the errors that could possibly come.");
+  for await (const chunk of result.stream) {
+    process.stdout.write(chunk.text());
+  }
+//   const response = await result.response;
+  
 
-  console.log(response.text());
+  console.log();
 }
 
 main();
