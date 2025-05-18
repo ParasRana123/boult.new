@@ -1,3 +1,11 @@
+enum StepType {
+  CreateFile,
+  CreateFolder,
+  EditFile,
+  DeleteFile,
+  RunScript,
+}
+
 export interface WebsiteFile {
   name: string;
   path: string;
@@ -24,6 +32,8 @@ export interface Step {
   title: string;
   description: string;
   status: 'pending' | 'in-progress' | 'completed' | 'error';
+  type: StepType;
+  code?: string;
 }
 
 export interface WebsiteBuilderContextType {
