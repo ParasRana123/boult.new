@@ -1,6 +1,8 @@
-import React, { createContext, useState, useContext, ReactNode } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { WebsiteProject, WebsiteFile, Step, WebsiteBuilderContextType } from '../types';
 import { generateMockProject } from '../utils/mockData';
+import { BACKEND_URL } from '../config';
+import axios from 'axios';
 
 const WebsiteBuilderContext = createContext<WebsiteBuilderContextType | undefined>(undefined);
 
@@ -25,8 +27,24 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const createProject = (prompt: string) => {
     // For this demo, we'll use mock data
     const newProject = generateMockProject(prompt);
-    
     const generatedSteps: Step[] = [];
+
+    async function init() {
+      const response = await axios.post(`${BACKEND_URL}/template` , {
+        messages: prompt.trim()
+      });
+      const { prompts , uiPrompts } = response.data;
+      const stepsResponse = await axios.post(`${BACKEND_URL}/chat` , {
+        messages: [...prompts , prompt].map(content => ({
+          role: "user",
+          content
+        }))
+      })
+    }
+
+    useEffect(() => {
+
+    } , [])
     
     setProject(newProject);
     setSteps(generatedSteps);
