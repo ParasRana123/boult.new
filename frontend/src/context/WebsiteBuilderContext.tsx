@@ -26,14 +26,7 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
     // For this demo, we'll use mock data
     const newProject = generateMockProject(prompt);
     
-    const generatedSteps: Step[] = [
-      { id: 1, title: 'Initialize Project', description: 'Setting up project structure', status: 'completed' },
-      { id: 2, title: 'Install Dependencies', description: 'Installing required packages', status: 'in-progress' },
-      { id: 3, title: 'Generate Components', description: 'Creating UI components', status: 'pending' },
-      { id: 4, title: 'Set Up Routing', description: 'Configuring navigation', status: 'pending' },
-      { id: 5, title: 'Add Styling', description: 'Applying theme and styles', status: 'pending' },
-      { id: 6, title: 'Finalize Build', description: 'Optimizing for production', status: 'pending' }
-    ];
+    const generatedSteps: Step[] = [];
     
     setProject(newProject);
     setSteps(generatedSteps);
