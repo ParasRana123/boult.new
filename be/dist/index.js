@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 import express from "express";
-import { BASE_PROMPT } from "./prompts.js";
+import { BASE_PROMPT, getSystemPrompt } from "./prompts.js";
 import { basePrompt as nodeBasePrompt } from "./defaults/node.js";
 import { basePrompt as reactBasePrompt } from "./defaults/react.js";
 // Load environment variables
@@ -81,6 +81,31 @@ app.post("/template", async (req, res) => {
             details: err?.message || String(err),
         });
     }
+});
+app.post("/chat", async (req, res) => {
+    const messages = req.body.messages;
+    const finalMessages = [
+        {
+            role: "system",
+            content: getSystemPrompt()
+        },
+        ...messages, // User and Assistant messages
+    ];
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${GROQ_API_KEY}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            model: "llama3-8b-8192",
+            stream: false,
+            messages: finalMessages
+        }),
+    });
+    const json = await response.json();
+    console.log("GROQ Chat Response:", JSON.stringify(json, null, 2));
+    res.json(json);
 });
 app.listen(3000, () => {
     console.log("Server listening on port 3000");
