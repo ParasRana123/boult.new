@@ -10,18 +10,22 @@ const LandingPage: React.FC = () => {
   const { createProject } = useWebsiteBuilder();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!prompt.trim()) return;
-    
-    setIsLoading(true);
-    
-    // Create project with the provided prompt
-    setTimeout(() => {
-      createProject(prompt);
-      navigate('/workspace');
-    }, 1500); // Simulating processing time
-  };
+  const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!prompt.trim()) return;
+
+  setIsLoading(true);
+
+  try {
+    await createProject(prompt);
+    navigate('/workspace');
+  } catch (error) {
+    console.error('Failed to create project:', error);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen flex flex-col">

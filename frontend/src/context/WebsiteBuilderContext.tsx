@@ -37,7 +37,7 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [steps, setSteps] = useState<Step[]>([]);
 
-  const createProject = async (prompt: string) => {
+  const createProject = async (prompt: string): Promise<void> => {
     try {
       const newProject = generateMockProject(prompt);
  

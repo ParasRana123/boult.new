@@ -77,13 +77,13 @@ app.post("/template", async (req: Request, res: Response): Promise<void> => {
     console.log("Extracted answer" , answer);
 
     if (answer === "react") {
-      res.json({ prompts: [BASE_PROMPT, `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`] , 
+      res.json({ prompts: [BASE_PROMPT, `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`] , 
                  uiPrompts: [reactBasePrompt] });
       return;
     }
 
     if (answer === "node") {
-      res.json({ prompts: [`Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`] , 
+      res.json({ prompts: [`Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files. \nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`] , 
                  uiPrompts: [nodeBasePrompt]});
       return;
     }
