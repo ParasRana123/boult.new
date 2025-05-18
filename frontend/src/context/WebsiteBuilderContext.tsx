@@ -78,7 +78,7 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
       const uiPromptsWithIds = parsedSteps.map((step: any, index: number) => ({
       ...step,
       id: index + 1,
-      status: 'idle',
+      status: 'completed',
       }));
 
       // Update state
