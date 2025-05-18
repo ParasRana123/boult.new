@@ -15,6 +15,7 @@ import {
 import { generateMockProject } from '../utils/mockData';
 import { BACKEND_URL } from '../config';
 import axios from 'axios';
+import { parseXml } from '../steps';
 
 const WebsiteBuilderContext = createContext<WebsiteBuilderContextType | undefined>(undefined);
 
@@ -39,11 +40,13 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const createProject = async (prompt: string) => {
     try {
       const newProject = generateMockProject(prompt);
-
+ 
       // Step 1: Call /template to classify the prompt
       const templateResponse = await axios.post(`${BACKEND_URL}/template`, {
         prompt: prompt.trim(),
       });
+
+      console.log('Template response:', templateResponse.data);
       const { prompts, uiPrompts } = templateResponse.data;
 
       // Step 2: Use prompts + user prompt to get actual steps
@@ -62,11 +65,25 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
         messages,
       });
 
-      const generatedSteps: Step[] = stepsResponse.data.steps || [];
+      console.log('uiPrompts:', uiPrompts);
+      console.log('chat response:', stepsResponse.data);
+
+
+      const parsedSteps =
+      Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
+      ? parseXml(uiPrompts[0])
+      : [];
+
+
+      const uiPromptsWithIds = parsedSteps.map((step: any, index: number) => ({
+      ...step,
+      id: index + 1,
+      status: 'idle',
+      }));
 
       // Update state
       setProject(newProject);
-      setSteps(generatedSteps);
+      setSteps(uiPromptsWithIds);
       setCurrentStep(1);
 
       if (newProject.rootFolder.files.length > 0) {
