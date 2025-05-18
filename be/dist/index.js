@@ -3,6 +3,7 @@ import express from "express";
 import { BASE_PROMPT, getSystemPrompt } from "./prompts.js";
 import { basePrompt as nodeBasePrompt } from "./defaults/node.js";
 import { basePrompt as reactBasePrompt } from "./defaults/react.js";
+import cors from 'cors';
 // Load environment variables
 config();
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
@@ -11,6 +12,7 @@ if (!GROQ_API_KEY) {
 }
 const app = express();
 app.use(express.json());
+app.use(cors());
 app.post("/template", async (req, res) => {
     try {
         const prompt = req.body.prompt;

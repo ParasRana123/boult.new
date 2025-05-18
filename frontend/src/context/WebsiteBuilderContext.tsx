@@ -1,5 +1,17 @@
-import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-import { WebsiteProject, WebsiteFile, Step, WebsiteBuilderContextType } from '../types';
+import React, {
+  createContext,
+  useState,
+  useContext,
+  ReactNode,
+  useEffect,
+} from 'react';
+import {
+  WebsiteProject,
+  WebsiteFile,
+  Step,
+  WebsiteBuilderContextType,
+  WebsiteFolder,
+} from '../types';
 import { generateMockProject } from '../utils/mockData';
 import { BACKEND_URL } from '../config';
 import axios from 'axios';
@@ -24,35 +36,44 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [steps, setSteps] = useState<Step[]>([]);
 
-  const createProject = (prompt: string) => {
-    // For this demo, we'll use mock data
-    const newProject = generateMockProject(prompt);
-    const generatedSteps: Step[] = [];
+  const createProject = async (prompt: string) => {
+    try {
+      const newProject = generateMockProject(prompt);
 
-    async function init() {
-      const response = await axios.post(`${BACKEND_URL}/template` , {
-        messages: prompt.trim()
+      // Step 1: Call /template to classify the prompt
+      const templateResponse = await axios.post(`${BACKEND_URL}/template`, {
+        prompt: prompt.trim(),
       });
-      const { prompts , uiPrompts } = response.data;
-      const stepsResponse = await axios.post(`${BACKEND_URL}/chat` , {
-        messages: [...prompts , prompt].map(content => ({
-          role: "user",
-          content
-        }))
-      })
-    }
+      const { prompts, uiPrompts } = templateResponse.data;
 
-    useEffect(() => {
+      // Step 2: Use prompts + user prompt to get actual steps
+      const messages = [
+        ...prompts.map((content: string) => ({
+          role: 'system',
+          content,
+        })),
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ];
 
-    } , [])
-    
-    setProject(newProject);
-    setSteps(generatedSteps);
-    setCurrentStep(1);
-    
-    // Select first file automatically
-    if (newProject.rootFolder.files.length > 0) {
-      setSelectedFile(newProject.rootFolder.files[0]);
+      const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
+        messages,
+      });
+
+      const generatedSteps: Step[] = stepsResponse.data.steps || [];
+
+      // Update state
+      setProject(newProject);
+      setSteps(generatedSteps);
+      setCurrentStep(1);
+
+      if (newProject.rootFolder.files.length > 0) {
+        setSelectedFile(newProject.rootFolder.files[0]);
+      }
+    } catch (err) {
+      console.error('Error creating project:', err);
     }
   };
 
@@ -62,31 +83,33 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
 
   const updateFile = (file: WebsiteFile) => {
     if (!project) return;
-    
+
     const updateFilesRecursively = (folder: WebsiteFolder): WebsiteFolder => {
-      const updatedFiles = folder.files.map(f => 
+      const updatedFiles = folder.files.map(f =>
         f.path === file.path ? file : f
       );
-      
-      const updatedFolders = folder.folders.map(f => updateFilesRecursively(f));
-      
+
+      const updatedFolders = folder.folders.map(f =>
+        updateFilesRecursively(f)
+      );
+
       return {
         ...folder,
         files: updatedFiles,
         folders: updatedFolders,
       };
     };
-    
+
     setProject({
       ...project,
       rootFolder: updateFilesRecursively(project.rootFolder),
     });
-    
+
     setSelectedFile(file);
   };
 
   const executeStep = (stepId: number) => {
-    setSteps(prevSteps => 
+    setSteps(prevSteps =>
       prevSteps.map(step => {
         if (step.id === stepId) {
           return { ...step, status: 'completed' };
@@ -96,7 +119,7 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
         return step;
       })
     );
-    
+
     setCurrentStep(stepId + 1);
   };
 
