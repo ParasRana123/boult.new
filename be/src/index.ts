@@ -1,18 +1,28 @@
 import { config } from "dotenv";
-import express from "express";
+import express, { Request, Response } from "express";
 import { BASE_PROMPT } from "./prompts.js";
 import { basePrompt as nodeBasePrompt } from "./defaults/node.js";
 import { basePrompt as reactBasePrompt } from "./defaults/react.js";
 
+// Load environment variables
 config();
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_API_KEY: string = process.env.GROQ_API_KEY || "";
+
+if (!GROQ_API_KEY) {
+  throw new Error("Missing GROQ_API_KEY in environment variables.");
+}
 
 const app = express();
 app.use(express.json());
 
-app.post("/template", async (req, res) => {
+app.post("/template", async (req: Request, res: Response): Promise<void> => {
   try {
-    const prompt = req.body.prompt;
+    const prompt: string = req.body.prompt;
+    if (!prompt) {
+      res.status(400).json({ error: "Prompt is required" });
+      return;
+    }
+
     const { default: fetch } = await import("node-fetch");
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -27,7 +37,8 @@ app.post("/template", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
+            content:
+              "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
           },
           {
             role: "user",
@@ -37,35 +48,49 @@ app.post("/template", async (req, res) => {
       }),
     });
 
-    const json = await response.json();
+    const json = (await response.json()) as {
+    choices?: { message?: { content?: string } }[];
+    };
+
     console.log("GROQ API raw response:", JSON.stringify(json, null, 2));
 
-    // Validate structure
     if (!json.choices || !Array.isArray(json.choices) || !json.choices[0]) {
-      return res.status(500).json({
+      res.status(500).json({
         error: "Invalid response structure from GROQ",
         data: json,
       });
+      return;
     }
 
-    const answer = json.choices[0]?.message?.content?.trim().toLowerCase();
-    console.log("Extracted answer:", answer);
+    const content = json.choices[0]?.message?.content;
+    if(!content) {
+      res.status(500).json({
+        error: "Missing data in Groq api response",
+        debugData: json
+      })
+      return;
+    }
+
+    const answer = content.trim().toLowerCase();
+    console.log("Extracted answer" , answer);
 
     if (answer === "react") {
-      return res.json({ prompts: [BASE_PROMPT, reactBasePrompt] });
+      res.json({ prompts: [BASE_PROMPT, reactBasePrompt] });
+      return;
     }
 
     if (answer === "node") {
-      return res.json({ prompts: [nodeBasePrompt] });
+      res.json({ prompts: [nodeBasePrompt] });
+      return;
     }
 
-    return res.status(403).json({
+    res.status(403).json({
       message: "Unexpected classification result",
       debugAnswer: answer,
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error("Unexpected error:", err);
-    return res.status(500).json({
+    res.status(500).json({
       error: "Unexpected error occurred",
       details: err?.message || String(err),
     });
@@ -75,8 +100,6 @@ app.post("/template", async (req, res) => {
 app.listen(3000, () => {
   console.log("Server listening on port 3000");
 });
-
-
 
 
 // async function main() {
