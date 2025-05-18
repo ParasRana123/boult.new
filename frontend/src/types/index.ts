@@ -1,4 +1,4 @@
-enum StepType {
+export enum StepType {
   CreateFile,
   CreateFolder,
   EditFile,
@@ -31,9 +31,10 @@ export interface Step {
   id: number;
   title: string;
   description: string;
-  status: 'pending' | 'in-progress' | 'completed' | 'error';
   type: StepType;
+  status: 'pending' | 'in-progress' | 'completed';
   code?: string;
+  path?: string;
 }
 
 export interface WebsiteBuilderContextType {
