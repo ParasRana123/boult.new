@@ -143,6 +143,21 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
         messages,
       });
 
+      console.log("Steps Response Data: " , stepsResponse.data);
+
+      const assistantMessage = stepsResponse.data?.choices?.[0]?.message?.content;
+
+      if (!assistantMessage || typeof assistantMessage !== 'string') {
+        throw new Error("Invalid assistant message content");
+      }
+
+      const parsedStepsFromChat = parseXml(assistantMessage).map(step => ({
+      ...step,
+      status: 'pending' as const,
+      }));
+
+      setSteps(prev => [...prev, ...parsedStepsFromChat]);
+
       const parsedSteps = Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
         ? parseXml(uiPrompts[0])
         : [];
@@ -219,4 +234,4 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
       {children}
     </WebsiteBuilderContext.Provider>
   );
-};
+}
