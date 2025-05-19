@@ -167,10 +167,44 @@ const parsedUiStepsWithIds = parsedUiSteps.map((step, index) => ({
   status: 'pending' as const,
 }));
 
-const combinedSteps = [...parsedStepsFromChat, ...parsedUiStepsWithIds];
+// Combine steps: prefer content from parsedStepsFromChat and metadata from parsedUiSteps
+const chatStepsMap = new Map(parsedStepsFromChat.map(step => [step.path, step]));
+
+const combinedSteps = parsedUiSteps.map((uiStep) => {
+  const chatStep = chatStepsMap.get(uiStep.path);
+
+  return {
+    id: 0, // will assign IDs below
+    status: 'pending' as const,
+    ...uiStep,           // UI metadata
+    ...(chatStep ? {     // Prefer content from chat if available
+      code: chatStep.code,
+      type: chatStep.type,
+    } : {}),
+  };
+});
+
+// Add chat steps that are missing in UI prompts
+const uiPaths = new Set(parsedUiSteps.map(step => step.path));
+const missingChatSteps = parsedStepsFromChat
+  .filter(chatStep => !uiPaths.has(chatStep.path))
+  .map(step => ({
+    ...step,
+    id: 0,
+    status: 'pending' as const,
+  }));
+
+// Combine all and assign unique IDs
+const allSteps = [...combinedSteps, ...missingChatSteps].map((step, index) => ({
+  ...step,
+  id: index + 1,
+}));
+
+setSteps(allSteps);
+
+
 
 setProject(newProject);
-setSteps(combinedSteps);
 setCurrentStep(1);
 
 console.log('🎉 Project created:', newProject);
