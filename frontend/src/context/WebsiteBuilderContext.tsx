@@ -36,23 +36,73 @@ interface WebsiteBuilderProviderProps {
 
 export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ children }) => {
   const [project, setProject] = useState<WebsiteProject | null>(null);
-  const [selectedFile, setSelectedFile] = useState<WebsiteFile | null>(null);
+  const [files , setFiles] = useState<WebsiteFile | null>(null);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [steps, setSteps] = useState<Step[]>([]);
 
-  useEffect(() => {
-    const step = steps.find(({status}) => status == "pending");
-    if (step?.type == StepType.CreateFile) {
-      const parsedPath = step.path?.split("/") ?? [];
-      const currentFileStructure = {...selectFile};
-      for(let i = 0 ; i < parsedPath.length ; i++) {
-        if(currentFileStructure.find(x => x.path === parsedPath[i])) {
-          
+    useEffect(() => {
+    let originalFiles = [...files];
+    let updateHappened = false;
+    steps.filter(({status}) => status === "pending").map(step => {
+      updateHappened = true;
+      if (step?.type === StepType.CreateFile) {
+        let parsedPath = step.path?.split("/") ?? []; // ["src", "components", "App.tsx"]
+        let currentFileStructure = [...originalFiles]; // {}
+        let finalAnswerRef = currentFileStructure;
+  
+        let currentFolder = ""
+        while(parsedPath.length) {
+          currentFolder =  `${currentFolder}/${parsedPath[0]}`;
+          let currentFolderName = parsedPath[0];
+          parsedPath = parsedPath.slice(1);
+  
+          if (!parsedPath.length) {
+            // final file
+            let file = currentFileStructure.find(x => x.path === currentFolder)
+            if (!file) {
+              currentFileStructure.push({
+                name: currentFolderName,
+                type: 'file',
+                path: currentFolder,
+                content: step.code
+              })
+            } else {
+              file.content = step.code;
+            }
+          } else {
+            /// in a folder
+            let folder = currentFileStructure.find(x => x.path === currentFolder)
+            if (!folder) {
+              // create the folder
+              currentFileStructure.push({
+                name: currentFolderName,
+                type: 'folder',
+                path: currentFolder,
+                children: []
+              })
+            }
+  
+            currentFileStructure = currentFileStructure.find(x => x.path === currentFolder)!.children!;
+          }
         }
+        originalFiles = finalAnswerRef;
       }
-    }
 
-  } , [steps , selectedFile])
+    })
+
+    if (updateHappened) {
+
+      setFiles(originalFiles)
+      setSteps(steps => steps.map((s: Step) => {
+        return {
+          ...s,
+          status: "completed"
+        }
+        
+      }))
+    }
+    console.log(files);
+  }, [steps, files]);
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
