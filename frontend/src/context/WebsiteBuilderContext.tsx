@@ -54,66 +54,69 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   }, [files]);
 
   useEffect(() => {
-    const pendingSteps = steps.filter(({ status }) => status === 'pending');
-    if (!pendingSteps.length) return;
+  const pendingSteps = steps.filter(({ status }) => status === 'pending');
+  if (!pendingSteps.length) return;
 
-    let newFiles = [...files];
-    let updateHappened = false;
+  const updatedRoot: WebsiteFolder = {
+    ...project?.rootFolder!,
+    files: [...project?.rootFolder?.files ?? []],
+    folders: [...project?.rootFolder?.folders ?? []],
+  };
 
-    pendingSteps.forEach(step => {
-      if (step?.type === StepType.CreateFile && step.path && step.code) {
-        updateHappened = true;
-        console.log('🔧 Processing step from LLM:', step);
+  const addToFolder = (
+    folder: WebsiteFolder,
+    pathParts: string[],
+    fullPath: string,
+    code: string
+  ) => {
+    const [current, ...rest] = pathParts;
 
-        const parsedPath = step.path.split('/');
-        let currentFileStructure = newFiles;
-        let currentFolderPath = '';
+    const currentPath = `${folder.path}/${current}`;
 
-        for (let i = 0; i < parsedPath.length; i++) {
-          const name = parsedPath[i];
-          currentFolderPath += `/${name}`;
-
-          const isFile = i === parsedPath.length - 1;
-
-          if (isFile) {
-            const existing = currentFileStructure.find(f => f.path === currentFolderPath);
-            if (existing) {
-              existing.content = step.code;
-            } else {
-              currentFileStructure.push({
-                name,
-                path: currentFolderPath,
-                content: step.code,
-                language: 'typescript',
-              });
-            }
-          } else {
-            let folder = currentFileStructure.find(
-              f => f.path === currentFolderPath && 'files' in f
-            ) as WebsiteFolder | undefined;
-
-            if (!folder) {
-              folder = {
-                name,
-                path: currentFolderPath,
-                files: [],
-                folders: [],
-              };
-              currentFileStructure.push(folder as WebsiteFile);
-            }
-
-            currentFileStructure = folder.files;
-          }
-        }
+    // If it's the last part, it's a file
+    if (rest.length === 0) {
+      // Check if file exists
+      const existingFile = folder.files.find(f => f.path === fullPath);
+      if (existingFile) {
+        existingFile.content = code;
+      } else {
+        folder.files.push({
+          name: current,
+          path: fullPath,
+          content: code,
+          language: 'typescript',
+        });
       }
-    });
-
-    if (updateHappened) {
-      console.log('✅ Final updated file structure from LLM:', newFiles);
-      setFiles(newFiles);
-      setSteps(prev => prev.map(s => (s.status === 'pending' ? { ...s, status: 'completed' } : s)));
+    } else {
+      // It's a folder
+      let subFolder = folder.folders.find(f => f.path === currentPath);
+      if (!subFolder) {
+        subFolder = {
+          name: current,
+          path: currentPath,
+          files: [],
+          folders: [],
+        };
+        folder.folders.push(subFolder);
+      }
+      addToFolder(subFolder, rest, fullPath, code);
     }
-  }, [steps]);
+  };
+
+  pendingSteps.forEach(step => {
+    if (step?.type === StepType.CreateFile && step.path && step.code) {
+      const pathParts = step.path.split('/').filter(Boolean);
+      addToFolder(updatedRoot, pathParts, step.path, step.code);
+    }
+  });
+
+  setProject(prev => (prev ? { ...prev, rootFolder: updatedRoot } : prev));
+  setFiles(updatedRoot.files); // top-level files only
+  setSteps(prev => prev.map(s => (s.status === 'pending' ? { ...s, status: 'completed' } : s)));
+
+  console.log('✅ Final updated file tree:', updatedRoot);
+}, [steps]);
+
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
