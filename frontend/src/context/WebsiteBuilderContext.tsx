@@ -151,29 +151,31 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
         throw new Error("Invalid assistant message content");
       }
 
-      const parsedStepsFromChat = parseXml(assistantMessage).map(step => ({
-      ...step,
-      status: 'pending' as const,
-      }));
+      const parsedStepsFromChat = parseXml(assistantMessage).map((step, index) => ({
+  ...step,
+  id: index + 1,
+  status: 'pending' as const,
+}));
 
-      setSteps(prev => [...prev, ...parsedStepsFromChat]);
+const parsedUiSteps = Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
+  ? parseXml(uiPrompts[0])
+  : [];
 
-      const parsedSteps = Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
-        ? parseXml(uiPrompts[0])
-        : [];
+const parsedUiStepsWithIds = parsedUiSteps.map((step, index) => ({
+  ...step,
+  id: parsedStepsFromChat.length + index + 1,
+  status: 'pending' as const,
+}));
 
-      const uiPromptsWithIds = parsedSteps.map((step: any, index: number) => ({
-        ...step,
-        id: index + 1,
-        status: 'pending',
-      }));
+const combinedSteps = [...parsedStepsFromChat, ...parsedUiStepsWithIds];
 
-      setProject(newProject);
-      setSteps(uiPromptsWithIds);
-      setCurrentStep(1);
+setProject(newProject);
+setSteps(combinedSteps);
+setCurrentStep(1);
 
-      console.log('🎉 Project created:', newProject);
-      console.log('📜 Parsed steps from LLM:', uiPromptsWithIds);
+console.log('🎉 Project created:', newProject);
+console.log('📜 Parsed all steps from LLM:', combinedSteps);
+
     } catch (err) {
       console.error('❌ Error creating project:', err);
     }
