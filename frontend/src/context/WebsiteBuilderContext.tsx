@@ -5,13 +5,16 @@ import React, {
   ReactNode,
   useEffect,
 } from 'react';
+
 import {
   WebsiteProject,
   WebsiteFile,
   Step,
   WebsiteBuilderContextType,
   WebsiteFolder,
+  StepType,
 } from '../types';
+
 import { generateMockProject } from '../utils/mockData';
 import { BACKEND_URL } from '../config';
 import axios from 'axios';
@@ -36,6 +39,20 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const [selectedFile, setSelectedFile] = useState<WebsiteFile | null>(null);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [steps, setSteps] = useState<Step[]>([]);
+
+  useEffect(() => {
+    const step = steps.find(({status}) => status == "pending");
+    if (step?.type == StepType.CreateFile) {
+      const parsedPath = step.path?.split("/") ?? [];
+      const currentFileStructure = {...selectFile};
+      for(let i = 0 ; i < parsedPath.length ; i++) {
+        if(currentFileStructure.find(x => x.path === parsedPath[i])) {
+          
+        }
+      }
+    }
+
+  } , [steps , selectedFile])
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
