@@ -41,76 +41,79 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const [selectedFile, setSelectedFile] = useState<WebsiteFile | null>(null);
   const [files, setFiles] = useState<WebsiteFile[]>([]);
 
+  // Keep project.rootFolder in sync with generated files
   useEffect(() => {
-    let originalFiles = [...files];
-    let updateHappened = false;
+    if (!project) return;
 
+    const rootFolder: WebsiteFolder = {
+      ...project.rootFolder,
+      files,
+    };
+
+    setProject({ ...project, rootFolder });
+  }, [files]);
+
+  useEffect(() => {
     const pendingSteps = steps.filter(({ status }) => status === 'pending');
+    if (!pendingSteps.length) return;
+
+    let newFiles = [...files];
+    let updateHappened = false;
 
     pendingSteps.forEach(step => {
       if (step?.type === StepType.CreateFile && step.path && step.code) {
         updateHappened = true;
-        console.log('Processing step from LLM:', step);
+        console.log('🔧 Processing step from LLM:', step);
 
-        let parsedPath = step.path?.split('/') ?? [];
-        let currentFileStructure = [...originalFiles];
-        let finalAnswerRef = currentFileStructure;
+        const parsedPath = step.path.split('/');
+        let currentFileStructure = newFiles;
+        let currentFolderPath = '';
 
-        let currentFolder = '';
+        for (let i = 0; i < parsedPath.length; i++) {
+          const name = parsedPath[i];
+          currentFolderPath += `/${name}`;
 
-        while (parsedPath.length) {
-          const currentFolderName = parsedPath[0];
-          currentFolder = `${currentFolder}/${currentFolderName}`;
-          parsedPath = parsedPath.slice(1);
+          const isFile = i === parsedPath.length - 1;
 
-          if (!parsedPath.length) {
-            // Final file
-            let existingFile = currentFileStructure.find(x => x.path === currentFolder);
-            if (!existingFile) {
+          if (isFile) {
+            const existing = currentFileStructure.find(f => f.path === currentFolderPath);
+            if (existing) {
+              existing.content = step.code;
+            } else {
               currentFileStructure.push({
-                name: currentFolderName,
-                path: currentFolder,
+                name,
+                path: currentFolderPath,
                 content: step.code,
                 language: 'typescript',
               });
-            } else {
-              existingFile.content = step.code;
             }
           } else {
-            // Folder
-            let existingFolder = currentFileStructure.find(
-              x => x.path === currentFolder && 'files' in x
+            let folder = currentFileStructure.find(
+              f => f.path === currentFolderPath && 'files' in f
             ) as WebsiteFolder | undefined;
 
-            if (!existingFolder) {
-              const newFolder: WebsiteFolder = {
-                name: currentFolderName,
-                path: currentFolder,
+            if (!folder) {
+              folder = {
+                name,
+                path: currentFolderPath,
                 files: [],
                 folders: [],
               };
-              currentFileStructure.push(newFolder as any);
+              currentFileStructure.push(folder as WebsiteFile);
             }
 
-            currentFileStructure = (
-              currentFileStructure.find(x => x.path === currentFolder && 'files' in x) as WebsiteFolder
-            ).files;
+            currentFileStructure = folder.files;
           }
         }
-
-        originalFiles = finalAnswerRef;
       }
     });
 
     if (updateHappened) {
-      console.log('Final updated file structure from LLM:', originalFiles);
-
-      setFiles(originalFiles);
-      setSteps(prev =>
-        prev.map(s => (s.status === 'pending' ? { ...s, status: 'completed' } : s))
-      );
+      console.log('✅ Final updated file structure from LLM:', newFiles);
+      setFiles(newFiles);
+      setSteps(prev => prev.map(s => (s.status === 'pending' ? { ...s, status: 'completed' } : s)));
     }
-  }, [steps, files]);
+  }, [steps]);
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
@@ -123,29 +126,22 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
       const { prompts, uiPrompts } = templateResponse.data;
 
       const messages = [
-        ...prompts.map((content: string) => ({
-          role: 'system',
-          content,
-        })),
-        {
-          role: 'user',
-          content: prompt,
-        },
+        ...prompts.map((content: string) => ({ role: 'system', content })),
+        { role: 'user', content: prompt },
       ];
 
       const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
         messages,
       });
 
-      const parsedSteps =
-        Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
-          ? parseXml(uiPrompts[0])
-          : [];
+      const parsedSteps = Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
+        ? parseXml(uiPrompts[0])
+        : [];
 
       const uiPromptsWithIds = parsedSteps.map((step: any, index: number) => ({
         ...step,
         id: index + 1,
-        status: 'completed',
+        status: 'pending',
       }));
 
       setProject(newProject);
@@ -156,10 +152,10 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
         setSelectedFile(newProject.rootFolder.files[0]);
       }
 
-      console.log('Project created:', newProject);
-      console.log('Parsed steps from LLM:', uiPromptsWithIds);
+      console.log('🎉 Project created:', newProject);
+      console.log('📜 Parsed steps from LLM:', uiPromptsWithIds);
     } catch (err) {
-      console.error('Error creating project:', err);
+      console.error('❌ Error creating project:', err);
     }
   };
 
@@ -171,26 +167,19 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
     if (!project) return;
 
     const updateFilesRecursively = (folder: WebsiteFolder): WebsiteFolder => {
-      const updatedFiles = folder.files.map(f =>
-        f.path === file.path ? file : f
-      );
+      const updatedFiles = folder.files.map(f => f.path === file.path ? file : f);
+      const updatedFolders = folder.folders.map(updateFilesRecursively);
 
-      const updatedFolders = folder.folders.map(f =>
-        updateFilesRecursively(f)
-      );
-
-      return {
-        ...folder,
-        files: updatedFiles,
-        folders: updatedFolders,
-      };
+      return { ...folder, files: updatedFiles, folders: updatedFolders };
     };
 
-    setProject({
+    const updatedProject = {
       ...project,
       rootFolder: updateFilesRecursively(project.rootFolder),
-    });
+    };
 
+    setProject(updatedProject);
+    setFiles(updatedProject.rootFolder.files);
     setSelectedFile(file);
   };
 
