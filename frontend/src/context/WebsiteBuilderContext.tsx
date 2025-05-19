@@ -36,87 +36,92 @@ interface WebsiteBuilderProviderProps {
 
 export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ children }) => {
   const [project, setProject] = useState<WebsiteProject | null>(null);
-  const [files , setFiles] = useState<WebsiteFile | null>(null);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [steps, setSteps] = useState<Step[]>([]);
+  const [selectedFile, setSelectedFile] = useState<WebsiteFile | null>(null);
+  const [files, setFiles] = useState<WebsiteFile[]>([]);
 
-    useEffect(() => {
+  useEffect(() => {
     let originalFiles = [...files];
     let updateHappened = false;
-    steps.filter(({status}) => status === "pending").map(step => {
-      updateHappened = true;
-      if (step?.type === StepType.CreateFile) {
-        let parsedPath = step.path?.split("/") ?? []; // ["src", "components", "App.tsx"]
-        let currentFileStructure = [...originalFiles]; // {}
+
+    const pendingSteps = steps.filter(({ status }) => status === 'pending');
+
+    pendingSteps.forEach(step => {
+      if (step?.type === StepType.CreateFile && step.path && step.code) {
+        updateHappened = true;
+        console.log('Processing step from LLM:', step);
+
+        let parsedPath = step.path?.split('/') ?? [];
+        let currentFileStructure = [...originalFiles];
         let finalAnswerRef = currentFileStructure;
-  
-        let currentFolder = ""
-        while(parsedPath.length) {
-          currentFolder =  `${currentFolder}/${parsedPath[0]}`;
-          let currentFolderName = parsedPath[0];
+
+        let currentFolder = '';
+
+        while (parsedPath.length) {
+          const currentFolderName = parsedPath[0];
+          currentFolder = `${currentFolder}/${currentFolderName}`;
           parsedPath = parsedPath.slice(1);
-  
+
           if (!parsedPath.length) {
-            // final file
-            let file = currentFileStructure.find(x => x.path === currentFolder)
-            if (!file) {
+            // Final file
+            let existingFile = currentFileStructure.find(x => x.path === currentFolder);
+            if (!existingFile) {
               currentFileStructure.push({
                 name: currentFolderName,
-                type: 'file',
                 path: currentFolder,
-                content: step.code
-              })
+                content: step.code,
+                language: 'typescript',
+              });
             } else {
-              file.content = step.code;
+              existingFile.content = step.code;
             }
           } else {
-            /// in a folder
-            let folder = currentFileStructure.find(x => x.path === currentFolder)
-            if (!folder) {
-              // create the folder
-              currentFileStructure.push({
+            // Folder
+            let existingFolder = currentFileStructure.find(
+              x => x.path === currentFolder && 'files' in x
+            ) as WebsiteFolder | undefined;
+
+            if (!existingFolder) {
+              const newFolder: WebsiteFolder = {
                 name: currentFolderName,
-                type: 'folder',
                 path: currentFolder,
-                children: []
-              })
+                files: [],
+                folders: [],
+              };
+              currentFileStructure.push(newFolder as any);
             }
-  
-            currentFileStructure = currentFileStructure.find(x => x.path === currentFolder)!.children!;
+
+            currentFileStructure = (
+              currentFileStructure.find(x => x.path === currentFolder && 'files' in x) as WebsiteFolder
+            ).files;
           }
         }
+
         originalFiles = finalAnswerRef;
       }
-
-    })
+    });
 
     if (updateHappened) {
+      console.log('Final updated file structure from LLM:', originalFiles);
 
-      setFiles(originalFiles)
-      setSteps(steps => steps.map((s: Step) => {
-        return {
-          ...s,
-          status: "completed"
-        }
-        
-      }))
+      setFiles(originalFiles);
+      setSteps(prev =>
+        prev.map(s => (s.status === 'pending' ? { ...s, status: 'completed' } : s))
+      );
     }
-    console.log(files);
   }, [steps, files]);
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
       const newProject = generateMockProject(prompt);
- 
-      // Step 1: Call /template to classify the prompt
+
       const templateResponse = await axios.post(`${BACKEND_URL}/template`, {
         prompt: prompt.trim(),
       });
 
-      console.log('Template response:', templateResponse.data);
       const { prompts, uiPrompts } = templateResponse.data;
 
-      // Step 2: Use prompts + user prompt to get actual steps
       const messages = [
         ...prompts.map((content: string) => ({
           role: 'system',
@@ -132,23 +137,17 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
         messages,
       });
 
-      console.log('uiPrompts:', uiPrompts);
-      console.log('chat response:', stepsResponse.data);
-
-
       const parsedSteps =
-      Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
-      ? parseXml(uiPrompts[0])
-      : [];
-
+        Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
+          ? parseXml(uiPrompts[0])
+          : [];
 
       const uiPromptsWithIds = parsedSteps.map((step: any, index: number) => ({
-      ...step,
-      id: index + 1,
-      status: 'completed',
+        ...step,
+        id: index + 1,
+        status: 'completed',
       }));
 
-      // Update state
       setProject(newProject);
       setSteps(uiPromptsWithIds);
       setCurrentStep(1);
@@ -156,6 +155,9 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
       if (newProject.rootFolder.files.length > 0) {
         setSelectedFile(newProject.rootFolder.files[0]);
       }
+
+      console.log('Project created:', newProject);
+      console.log('Parsed steps from LLM:', uiPromptsWithIds);
     } catch (err) {
       console.error('Error creating project:', err);
     }
