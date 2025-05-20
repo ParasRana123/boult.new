@@ -19,6 +19,7 @@ import { generateMockProject } from '../utils/mockData';
 import { BACKEND_URL } from '../config';
 import axios from 'axios';
 import { parseXml } from '../steps';
+import { useWebContainer } from '../hooks/useWebContainer';
 
 const WebsiteBuilderContext = createContext<WebsiteBuilderContextType | undefined>(undefined);
 
@@ -40,6 +41,7 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const [steps, setSteps] = useState<Step[]>([]);
   const [selectedFile, setSelectedFile] = useState<WebsiteFile | null>(null);
   const [files, setFiles] = useState<WebsiteFile[]>([]);
+  const webcontainer = useWebContainer();
 
   // Sync root folder whenever files change
   useEffect(() => {
@@ -113,6 +115,45 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
 
     console.log('✅ Final updated file tree:', updatedRoot);
   }, [steps]);
+
+  useEffect(() => {
+  if (!webcontainer || !files.length) return;
+
+  const mountStructure: any = {};
+
+  files.forEach(file => {
+    const parts = file.path.split('/').filter(Boolean);
+    let currentLevel = mountStructure;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+
+      if (isLast) {
+        currentLevel[part] = {
+          file: {
+            contents: file.content,
+          },
+        };
+      } else {
+        if (!currentLevel[part]) {
+          currentLevel[part] = { directory: {} };
+        }
+        currentLevel = currentLevel[part].directory;
+      }
+    }
+  });
+
+  webcontainer.mount(mountStructure)
+    .then(() => {
+      console.log('✅ Mounted structure:', mountStructure);
+    })
+    .catch(err => {
+      console.error('❌ Error mounting files:', err);
+    });
+}, [files, webcontainer]);
+
+
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
