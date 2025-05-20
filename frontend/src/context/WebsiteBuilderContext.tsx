@@ -4,6 +4,7 @@ import React, {
   useContext,
   ReactNode,
   useEffect,
+  useRef
 } from 'react';
 
 import {
@@ -105,10 +106,21 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
     setSteps(prev => prev.map(s => s.status === 'pending' ? { ...s, status: 'completed' } : s));
   }, [steps]);
 
-  useEffect(() => {
-  if (!webcontainer || !project) return;
+const mountRef = useRef(false); // placed outside the useEffect to persist between renders
 
-  const mountStructure: any = {};
+useEffect(() => {
+  if (!webcontainer || !project || !project.rootFolder || mountRef.current) return;
+
+  // Prevent mounting if no files are available
+  const hasFiles = project.rootFolder.files.length > 0 || project.rootFolder.folders.length > 0;
+  if (!hasFiles) {
+    console.warn('⚠️ Skipping mount: rootFolder has no files or subfolders');
+    return;
+  }
+
+  mountRef.current = true; // Mark as mounted
+
+  const mountStructure: Record<string, any> = {};
 
   const addFileToMountStructure = (
     structure: any,
@@ -124,28 +136,42 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
     }
   };
 
-  const traverseAndAddFiles = (folder: WebsiteFolder, currentStructure: any = mountStructure) => {
-  folder.files.forEach(file => {
-    const parts = file.path.split('/').filter(Boolean);
-    addFileToMountStructure(currentStructure, parts, file.content);
-  });
+  const traverseAndAddFiles = (
+    folder: WebsiteFolder,
+    currentStructure: any = mountStructure
+  ) => {
+    folder.files.forEach((file) => {
+      const parts = file.path.split('/').filter(Boolean);
+      addFileToMountStructure(currentStructure, parts, file.content);
+    });
 
-  folder.folders.forEach(subFolder => {
-    const folderName = subFolder.name;
-    if (!currentStructure[folderName]) {
-      currentStructure[folderName] = { directory: {} };
-    }
-    traverseAndAddFiles(subFolder, currentStructure[folderName].directory);
-  });
-};
-
+    folder.folders.forEach((subFolder) => {
+      const folderName = subFolder.name;
+      if (!currentStructure[folderName]) {
+        currentStructure[folderName] = { directory: {} };
+      }
+      traverseAndAddFiles(subFolder, currentStructure[folderName].directory);
+    });
+  };
 
   traverseAndAddFiles(project.rootFolder);
 
-  webcontainer.mount(mountStructure)
-    .then(() => console.log('✅ Mounted structure:', mountStructure))
-    .catch(err => console.error('❌ Error mounting files:', err));
+  if (Object.keys(mountStructure).length === 0) {
+    console.warn('⚠️ Mount structure is empty after traversal — skipping mount.');
+    return;
+  }
+
+  webcontainer
+    .mount(mountStructure)
+    .then(() => {
+      console.log('✅ Mounted files successfully: ' , mountStructure);
+      console.log('📦 Mount structure keys:', Object.keys(mountStructure));
+    })
+    .catch((err) => {
+      console.error('❌ Error mounting files:', err);
+    });
 }, [project, webcontainer]);
+
 
 
   const createProject = async (prompt: string): Promise<void> => {
