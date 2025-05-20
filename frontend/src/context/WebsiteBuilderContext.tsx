@@ -25,7 +25,7 @@ const WebsiteBuilderContext = createContext<WebsiteBuilderContextType | undefine
 
 export const useWebsiteBuilder = () => {
   const context = useContext(WebsiteBuilderContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useWebsiteBuilder must be used within a WebsiteBuilderProvider');
   }
   return context;
@@ -43,28 +43,19 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const [files, setFiles] = useState<WebsiteFile[]>([]);
   const webcontainer = useWebContainer();
 
-  // Sync root folder whenever files change
   useEffect(() => {
     if (!project) return;
 
-    const rootFolder: WebsiteFolder = {
-      ...project.rootFolder,
-      files,
-    };
-
-    setProject({ ...project, rootFolder });
+    setProject(prev => prev ? { ...prev, rootFolder: { ...prev.rootFolder, files } } : prev);
   }, [files]);
 
-  // Step execution: add LLM-generated files into the folder structure
   useEffect(() => {
-    const pendingSteps = steps.filter(({ status }) => status === 'pending');
-    if (!pendingSteps.length || !project) return;
+    if (!steps.length || !project) return;
 
-    const updatedRoot: WebsiteFolder = {
-      ...project.rootFolder,
-      files: [],
-      folders: [],
-    };
+    const pendingSteps = steps.filter(({ status }) => status === 'pending');
+    if (!pendingSteps.length) return;
+
+    const updatedRoot: WebsiteFolder = { ...project.rootFolder, files: [], folders: [] };
 
     const addToFolder = (
       folder: WebsiteFolder,
@@ -103,76 +94,53 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
     };
 
     pendingSteps.forEach(step => {
-      if (step?.type === StepType.CreateFile && step.path && step.code) {
+      if (step.type === StepType.CreateFile && step.path && step.code) {
         const pathParts = step.path.split('/').filter(Boolean);
         addToFolder(updatedRoot, pathParts, step.path, step.code);
       }
     });
 
-    setProject(prev => (prev ? { ...prev, rootFolder: updatedRoot } : prev));
-    setFiles(updatedRoot.files); 
-    setSteps(prev => prev.map(s => (s.status === 'pending' ? { ...s, status: 'completed' } : s)));
-
-    console.log('✅ Final updated file tree:', updatedRoot);
+    setProject(prev => prev ? { ...prev, rootFolder: updatedRoot } : prev);
+    setFiles(updatedRoot.files);
+    setSteps(prev => prev.map(s => s.status === 'pending' ? { ...s, status: 'completed' } : s));
   }, [steps]);
 
   useEffect(() => {
-  if (!webcontainer || !files.length) return;
+    if (!webcontainer || !files.length) return;
 
-  const mountStructure: any = {};
+    const mountStructure: any = {};
 
-  files.forEach(file => {
-    const parts = file.path.split('/').filter(Boolean);
-    let currentLevel = mountStructure;
+    files.forEach(file => {
+      const parts = file.path.split('/').filter(Boolean);
+      let currentLevel = mountStructure;
 
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      const isLast = i === parts.length - 1;
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        const isLast = i === parts.length - 1;
 
-      if (isLast) {
-        currentLevel[part] = {
-          file: {
-            contents: file.content,
-          },
-        };
-      } else {
-        if (!currentLevel[part]) {
-          currentLevel[part] = { directory: {} };
+        if (isLast) {
+          currentLevel[part] = { file: { contents: file.content } };
+        } else {
+          if (!currentLevel[part]) currentLevel[part] = { directory: {} };
+          currentLevel = currentLevel[part].directory;
         }
-        currentLevel = currentLevel[part].directory;
       }
-    }
-  });
-
-  webcontainer.mount(mountStructure)
-    .then(() => {
-      console.log('✅ Mounted structure:', mountStructure);
-    })
-    .catch(err => {
-      console.error('❌ Error mounting files:', err);
     });
-}, [files, webcontainer]);
 
-
+    webcontainer.mount(mountStructure)
+      .then(() => console.log('✅ Mounted structure:', mountStructure))
+      .catch(err => console.error('❌ Error mounting files:', err));
+  }, [files, webcontainer]);
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
       const mock = generateMockProject(prompt);
-
-      // Create empty root folder for new project (no mock files!)
       const newProject: WebsiteProject = {
         name: mock.name,
-        rootFolder: {
-          ...mock.rootFolder,
-          files: [], 
-          folders: [], 
-        },
+        rootFolder: { ...mock.rootFolder, files: [], folders: [] },
       };
 
-      const templateResponse = await axios.post(`${BACKEND_URL}/template`, {
-        prompt: prompt.trim(),
-      });
-
+      const templateResponse = await axios.post(`${BACKEND_URL}/template`, { prompt: prompt.trim() });
       const { prompts, uiPrompts } = templateResponse.data;
 
       const messages = [
@@ -180,85 +148,42 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
         { role: 'user', content: prompt },
       ];
 
-      const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
-        messages,
+      const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, { messages });
+      const assistantMessage = stepsResponse.data?.choices?.[0]?.message?.content;
+      if (!assistantMessage || typeof assistantMessage !== 'string') throw new Error("Invalid assistant message content");
+
+      const parsedStepsFromChat = parseXml(assistantMessage).map((step, i) => ({ ...step, id: i + 1, status: 'pending' }));
+
+      const parsedUiSteps = Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string' ? parseXml(uiPrompts[0]) : [];
+      const parsedUiStepsWithIds = parsedUiSteps.map((step, i) => ({ ...step, id: parsedStepsFromChat.length + i + 1, status: 'pending' }));
+
+      const chatStepsMap = new Map(parsedStepsFromChat.map(step => [step.path, step]));
+
+      const combinedSteps = parsedUiSteps.map(uiStep => {
+        const chatStep = chatStepsMap.get(uiStep.path);
+        return {
+          id: 0,
+          status: 'pending',
+          ...uiStep,
+          ...(chatStep ? { code: chatStep.code, type: chatStep.type } : {}),
+        };
       });
 
-      console.log("Steps Response Data: " , stepsResponse.data);
+      const uiPaths = new Set(parsedUiSteps.map(step => step.path));
+      const missingChatSteps = parsedStepsFromChat.filter(chatStep => !uiPaths.has(chatStep.path)).map(step => ({ ...step, id: 0, status: 'pending' }));
 
-      const assistantMessage = stepsResponse.data?.choices?.[0]?.message?.content;
+      const allSteps = [...combinedSteps, ...missingChatSteps].map((step, index) => ({ ...step, id: index + 1 }));
 
-      if (!assistantMessage || typeof assistantMessage !== 'string') {
-        throw new Error("Invalid assistant message content");
-      }
-
-      const parsedStepsFromChat = parseXml(assistantMessage).map((step, index) => ({
-  ...step,
-  id: index + 1,
-  status: 'pending' as const,
-}));
-
-const parsedUiSteps = Array.isArray(uiPrompts) && typeof uiPrompts[0] === 'string'
-  ? parseXml(uiPrompts[0])
-  : [];
-
-const parsedUiStepsWithIds = parsedUiSteps.map((step, index) => ({
-  ...step,
-  id: parsedStepsFromChat.length + index + 1,
-  status: 'pending' as const,
-}));
-
-// Combine steps: prefer content from parsedStepsFromChat and metadata from parsedUiSteps
-const chatStepsMap = new Map(parsedStepsFromChat.map(step => [step.path, step]));
-
-const combinedSteps = parsedUiSteps.map((uiStep) => {
-  const chatStep = chatStepsMap.get(uiStep.path);
-
-  return {
-    id: 0, // will assign IDs below
-    status: 'pending' as const,
-    ...uiStep,           // UI metadata
-    ...(chatStep ? {     // Prefer content from chat if available
-      code: chatStep.code,
-      type: chatStep.type,
-    } : {}),
-  };
-});
-
-// Add chat steps that are missing in UI prompts
-const uiPaths = new Set(parsedUiSteps.map(step => step.path));
-const missingChatSteps = parsedStepsFromChat
-  .filter(chatStep => !uiPaths.has(chatStep.path))
-  .map(step => ({
-    ...step,
-    id: 0,
-    status: 'pending' as const,
-  }));
-
-// Combine all and assign unique IDs
-const allSteps = [...combinedSteps, ...missingChatSteps].map((step, index) => ({
-  ...step,
-  id: index + 1,
-}));
-
-setSteps(allSteps);
-
-
-
-setProject(newProject);
-setCurrentStep(1);
-
-console.log('🎉 Project created:', newProject);
-console.log('📜 Parsed all steps from LLM:', combinedSteps);
+      setSteps(allSteps);
+      setProject(newProject);
+      setCurrentStep(1);
 
     } catch (err) {
       console.error('❌ Error creating project:', err);
     }
   };
 
-  const selectFile = (file: WebsiteFile) => {
-    setSelectedFile(file);
-  };
+  const selectFile = (file: WebsiteFile) => setSelectedFile(file);
 
   const updateFile = (file: WebsiteFile) => {
     if (!project) return;
@@ -266,7 +191,6 @@ console.log('📜 Parsed all steps from LLM:', combinedSteps);
     const updateFilesRecursively = (folder: WebsiteFolder): WebsiteFolder => {
       const updatedFiles = folder.files.map(f => f.path === file.path ? file : f);
       const updatedFolders = folder.folders.map(updateFilesRecursively);
-
       return { ...folder, files: updatedFiles, folders: updatedFolders };
     };
 
@@ -281,17 +205,11 @@ console.log('📜 Parsed all steps from LLM:', combinedSteps);
   };
 
   const executeStep = (stepId: number) => {
-    setSteps(prevSteps =>
-      prevSteps.map(step => {
-        if (step.id === stepId) {
-          return { ...step, status: 'completed' };
-        } else if (step.id === stepId + 1) {
-          return { ...step, status: 'in-progress' };
-        }
-        return step;
-      })
-    );
-
+    setSteps(prev => prev.map(step => {
+      if (step.id === stepId) return { ...step, status: 'completed' };
+      if (step.id === stepId + 1) return { ...step, status: 'in-progress' };
+      return step;
+    }));
     setCurrentStep(stepId + 1);
   };
 
