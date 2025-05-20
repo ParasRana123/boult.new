@@ -106,31 +106,47 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   }, [steps]);
 
   useEffect(() => {
-    if (!webcontainer || !files.length) return;
+  if (!webcontainer || !project) return;
 
-    const mountStructure: any = {};
+  const mountStructure: any = {};
 
-    files.forEach(file => {
-      const parts = file.path.split('/').filter(Boolean);
-      let currentLevel = mountStructure;
+  const addFileToMountStructure = (
+    structure: any,
+    pathParts: string[],
+    content: string
+  ) => {
+    const [current, ...rest] = pathParts;
+    if (rest.length === 0) {
+      structure[current] = { file: { contents: content } };
+    } else {
+      if (!structure[current]) structure[current] = { directory: {} };
+      addFileToMountStructure(structure[current].directory, rest, content);
+    }
+  };
 
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        const isLast = i === parts.length - 1;
+  const traverseAndAddFiles = (folder: WebsiteFolder, currentStructure: any = mountStructure) => {
+  folder.files.forEach(file => {
+    const parts = file.path.split('/').filter(Boolean);
+    addFileToMountStructure(currentStructure, parts, file.content);
+  });
 
-        if (isLast) {
-          currentLevel[part] = { file: { contents: file.content } };
-        } else {
-          if (!currentLevel[part]) currentLevel[part] = { directory: {} };
-          currentLevel = currentLevel[part].directory;
-        }
-      }
-    });
+  folder.folders.forEach(subFolder => {
+    const folderName = subFolder.name;
+    if (!currentStructure[folderName]) {
+      currentStructure[folderName] = { directory: {} };
+    }
+    traverseAndAddFiles(subFolder, currentStructure[folderName].directory);
+  });
+};
 
-    webcontainer.mount(mountStructure)
-      .then(() => console.log('✅ Mounted structure:', mountStructure))
-      .catch(err => console.error('❌ Error mounting files:', err));
-  }, [files, webcontainer]);
+
+  traverseAndAddFiles(project.rootFolder);
+
+  webcontainer.mount(mountStructure)
+    .then(() => console.log('✅ Mounted structure:', mountStructure))
+    .catch(err => console.error('❌ Error mounting files:', err));
+}, [project, webcontainer]);
+
 
   const createProject = async (prompt: string): Promise<void> => {
     try {
