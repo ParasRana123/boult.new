@@ -185,7 +185,7 @@ export function Builder() {
       content
     })));
 
-    setLlmMessages(x => [...x, {role: "assistant", content: stepsResponse.data.response}])
+    setLlmMessages(x => [...x, {role: "assistant", content: stepsResponse.data?.choices?.[0]?.message?.content}])
   }
 
   useEffect(() => {
@@ -233,10 +233,10 @@ export function Builder() {
                     setLlmMessages(x => [...x, newMessage]);
                     setLlmMessages(x => [...x, {
                       role: "assistant",
-                      content: stepsResponse.data.response
+                      content: stepsResponse.data?.choices?.[0]?.message?.content
                     }]);
                     
-                    setSteps(s => [...s, ...parseXml(stepsResponse.data.response).map(x => ({
+                    setSteps(s => [...s, ...parseXml(stepsResponse.data?.choices?.[0]?.message?.content).map(x => ({
                       ...x,
                       status: "pending" as "pending"
                     }))]);
