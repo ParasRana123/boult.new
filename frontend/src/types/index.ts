@@ -3,28 +3,7 @@ export enum StepType {
   CreateFolder,
   EditFile,
   DeleteFile,
-  RunScript,
-}
-
-export interface WebsiteFile {
-  name: string;
-  path: string;
-  content: string;
-  language: string;
-}
-
-export interface WebsiteFolder {
-  name: string;
-  path: string;
-  files: WebsiteFile[];
-  folders: WebsiteFolder[];
-}
-
-export interface WebsiteProject {
-  name: string;
-  description: string;
-  prompt: string;
-  rootFolder: WebsiteFolder;
+  RunScript
 }
 
 export interface Step {
@@ -37,14 +16,20 @@ export interface Step {
   path?: string;
 }
 
-export interface WebsiteBuilderContextType {
-  project: WebsiteProject | null;
-  currentStep: number;
+export interface Project {
+  prompt: string;
   steps: Step[];
-  selectedFile: WebsiteFile | null;
-  createProject: (prompt: string) => void;
-  selectFile: (file: WebsiteFile) => void;
-  updateFile: (file: WebsiteFile) => void;
-  executeStep: (stepId: number) => void;
-   previewUrl: string | null;  // <--- Moved here properly
+}
+
+export interface FileItem {
+  name: string;
+  type: 'file' | 'folder';
+  children?: FileItem[];
+  content?: string;
+  path: string;
+}
+
+export interface FileViewerProps {
+  file: FileItem | null;
+  onClose: () => void;
 }

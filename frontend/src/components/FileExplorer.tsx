@@ -1,63 +1,85 @@
-import React from 'react';
-import { useWebsiteBuilder } from '../context/WebsiteBuilderContext';
-import { Folder, FileText } from 'lucide-react';
-import { WebsiteFile, WebsiteFolder } from '../types';
+import React, { useState } from 'react';
+import { FolderTree, File, ChevronRight, ChevronDown } from 'lucide-react';
+import { FileItem } from '../types';
 
-const FileExplorer: React.FC = () => {
-  const { project, selectFile, selectedFile } = useWebsiteBuilder();
+interface FileExplorerProps {
+  files: FileItem[];
+  onFileSelect: (file: FileItem) => void;
+}
 
-  if (!project) {
-    return <div className="p-4">No project loaded</div>;
-  }
+interface FileNodeProps {
+  item: FileItem;
+  depth: number;
+  onFileClick: (file: FileItem) => void;
+}
 
-  const renderFolder = (folder: WebsiteFolder, depth = 0) => {
-    return (
-      <div key={folder.path} className="space-y-1">
-        <div className="flex items-center gap-2 px-3 py-1.5 text-slate-300 font-medium">
-          <Folder className="w-4 h-4 text-blue-400" />
-          <span>{folder.name}</span>
-        </div>
+function FileNode({ item, depth, onFileClick }: FileNodeProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
 
-        <div className="pl-4">
-          {/* Files */}
-          {folder.files.map((file) => renderFile(file))}
-          
-          {/* Subfolders */}
-          {folder.folders.map((subfolder) => renderFolder(subfolder, depth + 1))}
-        </div>
-      </div>
-    );
-  };
-
-  const renderFile = (file: WebsiteFile) => {
-    const isSelected = selectedFile?.path === file.path;
-    
-    return (
-      <div 
-        key={file.path}
-        className={`flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer ${
-          isSelected 
-            ? 'bg-blue-600/30 text-blue-200' 
-            : 'text-slate-300 hover:bg-slate-800'
-        }`}
-        onClick={() => selectFile(file)}
-      >
-        <FileText className="w-4 h-4 text-slate-400" />
-        <span>{file.name}</span>
-      </div>
-    );
+  const handleClick = () => {
+    if (item.type === 'folder') {
+      setIsExpanded(!isExpanded);
+    } else {
+      onFileClick(item);
+    }
   };
 
   return (
-    <div className="p-2">
-      <div className="mb-2 px-3 py-2 text-slate-400 text-sm font-medium">
-        Files
+    <div className="select-none">
+      <div
+        className="flex items-center gap-2 p-2 hover:bg-gray-800 rounded-md cursor-pointer"
+        style={{ paddingLeft: `${depth * 1.5}rem` }}
+        onClick={handleClick}
+      >
+        {item.type === 'folder' && (
+          <span className="text-gray-400">
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </span>
+        )}
+        {item.type === 'folder' ? (
+          <FolderTree className="w-4 h-4 text-blue-400" />
+        ) : (
+          <File className="w-4 h-4 text-gray-400" />
+        )}
+        <span className="text-gray-200">{item.name}</span>
       </div>
-      <div className="space-y-1 mt-2">
-        {renderFolder(project.rootFolder)}
+      {item.type === 'folder' && isExpanded && item.children && (
+        <div>
+          {item.children.map((child, index) => (
+            <FileNode
+              key={`${child.path}-${index}`}
+              item={child}
+              depth={depth + 1}
+              onFileClick={onFileClick}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function FileExplorer({ files, onFileSelect }: FileExplorerProps) {
+  return (
+    <div className="bg-gray-900 rounded-lg shadow-lg p-4 h-full overflow-auto">
+      <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-gray-100">
+        <FolderTree className="w-5 h-5" />
+        File Explorer
+      </h2>
+      <div className="space-y-1">
+        {files.map((file, index) => (
+          <FileNode
+            key={`${file.path}-${index}`}
+            item={file}
+            depth={0}
+            onFileClick={onFileSelect}
+          />
+        ))}
       </div>
     </div>
   );
-};
-
-export default FileExplorer;
+}
