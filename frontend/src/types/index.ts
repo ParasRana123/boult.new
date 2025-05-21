@@ -46,4 +46,5 @@ export interface WebsiteBuilderContextType {
   selectFile: (file: WebsiteFile) => void;
   updateFile: (file: WebsiteFile) => void;
   executeStep: (stepId: number) => void;
+   previewUrl: string | null;  // <--- Moved here properly
 }

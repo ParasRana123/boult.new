@@ -42,6 +42,7 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
   const [steps, setSteps] = useState<Step[]>([]);
   const [selectedFile, setSelectedFile] = useState<WebsiteFile | null>(null);
   const [files, setFiles] = useState<WebsiteFile[]>([]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const webcontainer = useWebContainer();
 
   useEffect(() => {
@@ -109,67 +110,121 @@ export const WebsiteBuilderProvider: React.FC<WebsiteBuilderProviderProps> = ({ 
 const mountRef = useRef(false); // placed outside the useEffect to persist between renders
 
 useEffect(() => {
-  if (!webcontainer || !project || !project.rootFolder || mountRef.current) return;
+  const setupWebContainer = async () => {
+    if (!webcontainer || !project || !project.rootFolder || mountRef.current) return;
 
-  // Prevent mounting if no files are available
-  const hasFiles = project.rootFolder.files.length > 0 || project.rootFolder.folders.length > 0;
-  if (!hasFiles) {
-    console.warn('⚠️ Skipping mount: rootFolder has no files or subfolders');
-    return;
-  }
+    const hasFiles =
+      project.rootFolder.files.length > 0 || project.rootFolder.folders.length > 0;
+    if (!hasFiles) {
+      console.warn('⚠️ Skipping mount: rootFolder has no files or subfolders');
+      return;
+    }
 
-  mountRef.current = true; // Mark as mounted
+    mountRef.current = true;
 
-  const mountStructure: Record<string, any> = {};
+    const mountStructure: Record<string, any> = {};
 
-  const addFileToMountStructure = (
-    structure: any,
-    pathParts: string[],
-    content: string
-  ) => {
-    const [current, ...rest] = pathParts;
-    if (rest.length === 0) {
-      structure[current] = { file: { contents: content } };
-    } else {
-      if (!structure[current]) structure[current] = { directory: {} };
-      addFileToMountStructure(structure[current].directory, rest, content);
+    const addFileToMountStructure = (
+      structure: any,
+      pathParts: string[],
+      content: string
+    ) => {
+      const [current, ...rest] = pathParts;
+      if (rest.length === 0) {
+        structure[current] = { file: { contents: content } };
+      } else {
+        if (!structure[current]) structure[current] = { directory: {} };
+        addFileToMountStructure(structure[current].directory, rest, content);
+      }
+    };
+
+    const traverseAndAddFiles = (
+      folder: WebsiteFolder,
+      currentStructure: any = mountStructure
+    ) => {
+      folder.files.forEach((file) => {
+        const parts = file.path.split('/').filter(Boolean);
+        addFileToMountStructure(currentStructure, parts, file.content);
+      });
+
+      folder.folders.forEach((subFolder) => {
+        const folderName = subFolder.name;
+        if (!currentStructure[folderName]) {
+          currentStructure[folderName] = { directory: {} };
+        }
+        traverseAndAddFiles(subFolder, currentStructure[folderName].directory);
+      });
+    };
+
+    traverseAndAddFiles(project.rootFolder);
+
+    if (Object.keys(mountStructure).length === 0) {
+      console.warn('⚠️ Mount structure is empty after traversal — skipping mount.');
+      return;
+    }
+
+    try {
+      await webcontainer.mount(mountStructure);
+      console.log('✅ Mounted files successfully:', mountStructure);
+
+      // Helper to safely log process output
+      const createSafeLoggerStream = () =>
+        new WritableStream({
+          write(chunk) {
+            try {
+              const dataView = chunk instanceof Uint8Array
+                ? chunk
+                : new Uint8Array(chunk);
+              const text = new TextDecoder().decode(dataView);
+              console.log(text);
+            } catch (err) {
+              console.error('❌ Stream decoding failed:', err);
+            }
+          }
+        });
+
+      // Install dependencies if package.json exists
+      if (mountStructure['package.json']) {
+        const installProcess = await webcontainer.spawn('npm', ['install']);
+        installProcess.output.pipeTo(createSafeLoggerStream());
+        await installProcess.exit;
+      }
+
+      // Start the development server
+      const serverProcess = await webcontainer.spawn('npx', [
+        'http-server',
+        '.',
+        '-p',
+        '3000'
+      ]);
+
+      const serverReady = new Promise<void>((resolve) => {
+        serverProcess.output.pipeTo(
+          new WritableStream({
+            write(chunk) {
+              try {
+                const dataView = chunk instanceof Uint8Array
+                  ? chunk
+                  : new Uint8Array(chunk);
+                const text = new TextDecoder().decode(dataView);
+                console.log('Server log:', text);
+                if (text.includes('http-server running')) resolve();
+              } catch (err) {
+                console.error('❌ Decoding server output failed:', err);
+              }
+            }
+          })
+        );
+      });
+
+      await serverReady;
+      setPreviewUrl('http://localhost:3000');
+    } catch (err) {
+      console.error('❌ Error setting up WebContainer:', err);
     }
   };
 
-  const traverseAndAddFiles = (
-    folder: WebsiteFolder,
-    currentStructure: any = mountStructure
-  ) => {
-    folder.files.forEach((file) => {
-      const parts = file.path.split('/').filter(Boolean);
-      addFileToMountStructure(currentStructure, parts, file.content);
-    });
-
-    folder.folders.forEach((subFolder) => {
-      const folderName = subFolder.name;
-      if (!currentStructure[folderName]) {
-        currentStructure[folderName] = { directory: {} };
-      }
-      traverseAndAddFiles(subFolder, currentStructure[folderName].directory);
-    });
-  };
-
-  traverseAndAddFiles(project.rootFolder);
-
-  if (Object.keys(mountStructure).length === 0) {
-    console.warn('⚠️ Mount structure is empty after traversal — skipping mount.');
-    return;
-  }
-
-  webcontainer
-    .mount(mountStructure)
-    .then(() => {
-      console.log('✅ Mounted files successfully: ' , mountStructure);
-      console.log('📦 Mount structure keys:', Object.keys(mountStructure));
-    })
-    .catch((err) => {
-      console.error('❌ Error mounting files:', err);
-    });
+  setupWebContainer();
 }, [project, webcontainer]);
 
 
@@ -264,6 +319,7 @@ useEffect(() => {
     selectFile,
     updateFile,
     executeStep,
+    previewUrl, // <-- Add this
   };
 
   return (
