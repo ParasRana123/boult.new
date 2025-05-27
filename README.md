@@ -17,6 +17,26 @@ An end-to-end AI-based web project generator that transforms natural language pr
 - **Backend**: Node.js, Express.js
 - **Code Execution**: Web Containers
 
+## Project Structure
+
+```bash
+├── backend/
+│   ├── src/              
+│        ├── defaults/     # Default prompts for node and react
+│            ├── react.ts
+│            └── node.ts
+│   ├── index.ts           # All main routes in this file
+│   ├── prompts.ts         # format in which the response returned
+│   ├── constants.ts       # Utility file
+│   └── stripindents.ts    # Utility file
+├── frontend/
+│   ├── components/        # Contains various components
+│   ├── hooks/             # Web Container config file
+│   ├── pages/             # Contains landing page
+│   └── types/             # Defined the types of file structure
+└── README.md
+```
+
 ## Installation
 
 > **Note**: Ensure Node.js (v16+) is installed on your machine.
