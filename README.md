@@ -13,6 +13,16 @@ An end-to-end AI-based web project generator that transforms natural language pr
 ## Tech Stack
 
 - **AI Model**: LLAMA
-- **Frontend**: React (optional), HTML, CSS, JavaScript
+- **Frontend**: React, HTML, CSS, JavaScript
 - **Backend**: Node.js, Express.js
 - **Code Execution**: Web Containers
+
+## Installation
+
+> **Note**: Ensure Node.js (v16+) is installed on your machine.
+
+1. **Clone the Repository**
+
+```bash
+git clone [repository-url]
+cd llama-web-generator
