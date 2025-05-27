@@ -1,3 +1,10 @@
+/*
+Bunch of TODOs:
+- To add frontend animations just like how boult does it.
+- To replace lLAMA api with Claude API (Not sure).
+*/
+
+
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { StepsList } from '../components/StepsList';
