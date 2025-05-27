@@ -13,7 +13,7 @@ An end-to-end AI-based web project generator that transforms natural language pr
 ## Tech Stack
 
 - **AI Model**: LLAMA
-- **Frontend**: React, HTML, CSS, JavaScript
+- **Frontend**: React, HTML, CSS, TypeScript
 - **Backend**: Node.js, Express.js
 - **Code Execution**: Web Containers
 
@@ -82,3 +82,10 @@ npm run dev
 cd frontend
 npm run dev
 ```
+
+## Contributing
+
+We welcome contributions from the community! Whether you're interested in improving features, fixing bugs, or adding new functionality, your input is valuable. Feel free to reach out to us with your ideas and suggestions.
+
+## License
+This project is licensed under the MIT License - see the LICENSE file for details.
