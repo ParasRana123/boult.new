@@ -63,7 +63,10 @@ npm install
 
 4. **Set up environment varaibles**
 
-> **Note**: Create the .env file in the be foolder.
+> **Note**: Create the .env file in the be folder.
+   ```bash
+    cd be
+    ```
 ```bash
 echo. > .env
 ```
@@ -71,7 +74,7 @@ echo. > .env
 5. **Start the backend server**
 
 ```bash
-cd backend
+cd be
 npm run dev
 ```
 
