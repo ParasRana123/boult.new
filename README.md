@@ -8,7 +8,6 @@ An end-to-end AI-based web project generator that transforms natural language pr
 ●  Parses LLAMA-generated XML into development steps and structured frontend files  
 ●  Dynamically generates code and file structures on-the-fly  
 ●  In-browser live preview using Web Containers (no local setup needed)  
-●  Session-based storage with on-demand file regeneration
 
 ## Tech Stack
 
