@@ -118,34 +118,48 @@ export function formatMessagesForGemini(messages: ChatMessage[]): GeminiContent[
   return formatted;
 }
 
-app.post("/chat" , async (req , res) => {
-    const messages = req.body.messages;
-    const finalMessages = [
-      {
-        role: "system",
-        content: getSystemPrompt()
-      },
-      ...messages,    // User and Assistant messages
-    ]
+app.post("/chat", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const messages = req.body.messages || [];
+    const contents = formatMessagesForGemini(messages);
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama3-8b-8192",
-        stream: false,
-        messages: finalMessages
-      }),
+    if (contents.length === 0) {
+      res.status(400).json({ error: "Messages array is required and cannot be empty" });
+      return;
+    }
+
+    const model = genAI.getGenerativeModel({
+      model: "gemini-3.6-flash",
+      systemInstruction: getSystemPrompt(),
     });
 
-    const json = await response.json();
-    console.log("GROQ Chat Response:", JSON.stringify(json, null, 2));
+    const result = await model.generateContent({
+      contents,
+    });
 
-    res.json(json);
-})
+    const responseText = result.response.text();
+    console.log("Gemini Chat Response length:", responseText.length);
+
+    // Return response structure compatible with frontend
+    res.json({
+      response: responseText,
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: responseText,
+          },
+        },
+      ],
+    });
+  } catch (err: any) {
+    console.error("Unexpected error in /chat:", err);
+    res.status(500).json({
+      error: "Unexpected error occurred",
+      details: err?.message || String(err),
+    });
+  }
+});
 
 app.listen(3000, () => {
   console.log("Server listening on port 3000");
