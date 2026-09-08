@@ -11,7 +11,7 @@ import { BACKEND_URL } from '../config';
 import { parseXml } from '../steps';
 import { useWebContainer } from '../hooks/useWebContainer';
 import { Loader } from '../components/Loader';
-import { AlertCircle, RefreshCw, Send, Sparkles, ArrowLeft, Terminal } from 'lucide-react';
+import { AlertCircle, RefreshCw, Send, Sparkles, ArrowLeft, Terminal, Clock } from 'lucide-react';
 
 function applyStepsToFiles(existingFiles: FileItem[], stepsToApply: Step[]): FileItem[] {
   const rootFiles: FileItem[] = JSON.parse(JSON.stringify(existingFiles));
@@ -88,6 +88,7 @@ export function Builder() {
   const [isWritingCode, setIsWritingCode] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const [templateSet, setTemplateSet] = useState(false);
   const webcontainer = useWebContainer();
 
@@ -104,6 +105,26 @@ export function Builder() {
   useEffect(() => {
     selectedFilePathRef.current = selectedFile ? selectedFile.path : null;
   }, [selectedFile]);
+
+  // Rate-limit auto-retry countdown timer
+  useEffect(() => {
+    if (countdown === null) return;
+
+    if (countdown <= 0) {
+      setCountdown(null);
+      setErrorMessage(null);
+      if (llmMessages.length > 0) {
+        executeChatRequest(llmMessages, allCompletedStepsRef.current);
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setCountdown(prev => (prev !== null ? prev - 1 : null));
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [countdown, llmMessages]);
 
   // Mount structure to WebContainer when files change
   useEffect(() => {
@@ -245,13 +266,13 @@ export function Builder() {
    */
   const executeChatRequest = async (
     messagesToSend: { role: string; content: string }[],
-    baseSteps: Step[] = [],
-    retryCount: number = 0
+    baseSteps: Step[] = []
   ) => {
     setLoading(true);
     setIsWritingCode(true);
     setErrorMessage(null);
-    setStatusMessage("Connecting to Gemini and generating project code...");
+    setCountdown(null);
+    setStatusMessage("Connecting to Gemini streaming pool...");
     setActiveTab('code');
 
     try {
@@ -268,14 +289,15 @@ export function Builder() {
       });
 
       if (!response.ok) {
-        if (response.status === 429 && retryCount < 3) {
-          const waitTime = (retryCount + 1) * 3;
-          setStatusMessage(`Gemini rate limit reached. Retrying automatically in ${waitTime}s...`);
-          await sleep(waitTime * 1000);
-          return await executeChatRequest(messagesToSend, baseSteps, retryCount + 1);
+        const errJson = await response.json().catch(() => null);
+        if (response.status === 429 || errJson?.isRateLimit) {
+          const waitTime = errJson?.retryDelay || 50;
+          setCountdown(waitTime);
+          setStatusMessage(`Rate limit reached. Auto-resuming in ${waitTime}s...`);
+          setErrorMessage(`Gemini API free tier quota limit reached. Auto-resuming in ${waitTime} seconds...`);
+          return;
         }
-        const errText = await response.text();
-        throw new Error(`Server returned ${response.status}: ${errText}`);
+        throw new Error(errJson?.error || `Server returned ${response.status}: ${response.statusText}`);
       }
 
       if (!response.body) {
@@ -305,11 +327,12 @@ export function Builder() {
           try {
             const parsed = JSON.parse(dataStr);
             if (parsed.error) {
-              if (parsed.isRateLimit && retryCount < 3) {
-                const waitTime = (retryCount + 1) * 3;
-                setStatusMessage(`Rate limit encountered. Retrying in ${waitTime}s...`);
-                await sleep(waitTime * 1000);
-                return await executeChatRequest(messagesToSend, baseSteps, retryCount + 1);
+              if (parsed.isRateLimit) {
+                const waitTime = parsed.retryDelay || 50;
+                setCountdown(waitTime);
+                setStatusMessage(`Rate limit reached. Auto-resuming in ${waitTime}s...`);
+                setErrorMessage(parsed.error);
+                return;
               }
               setErrorMessage(parsed.error);
               continue;
@@ -515,8 +538,32 @@ export function Builder() {
         </div>
       </header>
 
+      {/* Auto-retry Countdown Banner */}
+      {countdown !== null && (
+        <div className="bg-gradient-to-r from-amber-950 via-amber-900/90 to-amber-950 border-b border-amber-600/70 px-6 py-2.5 flex items-center justify-between text-amber-100 text-xs shadow-lg animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <Clock className="w-4 h-4 text-amber-400 animate-spin flex-shrink-0" />
+            <span>
+              Gemini free tier quota limit reached. Auto-resuming generation in <strong className="text-amber-300 text-sm font-mono">{countdown}s</strong>...
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setCountdown(null);
+              if (llmMessages.length > 0) {
+                executeChatRequest(llmMessages, allCompletedStepsRef.current);
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm active:scale-95"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry Now
+          </button>
+        </div>
+      )}
+
       {/* Error notification banner if API limit or network failure */}
-      {errorMessage && (
+      {errorMessage && countdown === null && (
         <div className="bg-red-950/90 border-b border-red-800/80 px-6 py-2.5 flex items-center justify-between text-red-200 text-xs">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
