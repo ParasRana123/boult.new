@@ -422,20 +422,31 @@ export function Builder() {
       setLoading(true);
       setStatusMessage("Analyzing prompt and initializing project scaffold...");
 
-      const response = await axios.post(`${BACKEND_URL}/template`, {
-        prompt: prompt.trim(),
-      });
+      let promptsData: string[] = [];
+      let uiPromptsData: string[] = [];
+
+      try {
+        const response = await axios.post(`${BACKEND_URL}/template`, {
+          prompt: (prompt || "React application").trim(),
+        });
+        promptsData = response.data?.prompts || [];
+        uiPromptsData = response.data?.uiPrompts || [];
+      } catch (templateErr) {
+        console.warn("Backend /template endpoint error, using default scaffold:", templateErr);
+      }
+
       setTemplateSet(true);
 
-      const { prompts, uiPrompts } = response.data;
-
       // 1. Animate template steps smoothly step-by-step
-      const rawTemplateSteps = parseXml(uiPrompts[0], true);
-      const animatedBaseSteps = await playSequentialSteps(rawTemplateSteps, []);
+      let animatedBaseSteps: Step[] = [];
+      if (uiPromptsData.length > 0) {
+        const rawTemplateSteps = parseXml(uiPromptsData[0], true);
+        animatedBaseSteps = await playSequentialSteps(rawTemplateSteps, []);
+      }
       allCompletedStepsRef.current = animatedBaseSteps;
 
       // 2. Request AI custom code with true real-time token streaming
-      const initialMessages = [...prompts, prompt].map(content => ({
+      const initialMessages = [...promptsData, prompt].filter(Boolean).map(content => ({
         role: 'user',
         content,
       }));
