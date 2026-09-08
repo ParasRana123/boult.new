@@ -74,39 +74,52 @@ app.get("/health", (req: Request, res: Response): void => {
 });
 
 app.post("/template", async (req: Request, res: Response): Promise<void> => {
+  const prompt: string = (req.body.prompt || "").trim();
+  let answer = "react";
+
   try {
-    const prompt: string = req.body.prompt;
-    if (!prompt) {
-      res.status(400).json({ error: "Prompt is required" });
-      return;
+    if (prompt) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: "gemini-3.6-flash",
+          systemInstruction:
+            "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
+        });
+
+        const result = await callWithRetry(
+          "template-classification",
+          () => model.generateContent(prompt),
+          2,
+          1000
+        );
+        const content = result.response.text();
+        console.log("Gemini Template raw response:", content);
+
+        const extracted = content.trim().toLowerCase().replace(/[^a-z]/g, "");
+        if (extracted.includes("node") || extracted.includes("react")) {
+          answer = extracted;
+        }
+      } catch (classifyErr: any) {
+        console.warn(
+          "Gemini classification failed/rate-limited, falling back to heuristic:",
+          classifyErr?.message || classifyErr
+        );
+        // Heuristic fallback
+        const lower = prompt.toLowerCase();
+        if (
+          lower.includes("node") ||
+          lower.includes("express") ||
+          lower.includes("backend only") ||
+          lower.includes("cli")
+        ) {
+          answer = "node";
+        } else {
+          answer = "react";
+        }
+      }
     }
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3.6-flash",
-      systemInstruction:
-        "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
-    });
-
-    const result = await callWithRetry("template-classification", () =>
-      model.generateContent(prompt)
-    );
-    const content = result.response.text();
-
-    console.log("Gemini Template raw response:", content);
-
-    const answer = content.trim().toLowerCase().replace(/[^a-z]/g, "");
-    console.log("Extracted answer:", answer);
-
-    if (answer.includes("react")) {
-      res.json({
-        prompts: [
-          BASE_PROMPT,
-          `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
-        ],
-        uiPrompts: [reactBasePrompt],
-      });
-      return;
-    }
+    console.log("Resolved project template:", answer);
 
     if (answer.includes("node")) {
       res.json({
@@ -118,7 +131,7 @@ app.post("/template", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Default fallback to react if ambiguous
+    // Default to react
     res.json({
       prompts: [
         BASE_PROMPT,
@@ -127,10 +140,14 @@ app.post("/template", async (req: Request, res: Response): Promise<void> => {
       uiPrompts: [reactBasePrompt],
     });
   } catch (err: any) {
-    console.error("Unexpected error in /template:", err);
-    res.status(500).json({
-      error: "Unexpected error occurred",
-      details: err?.message || String(err),
+    console.error("Critical error in /template fallback:", err);
+    // Absolute fallback - never fail with 500
+    res.json({
+      prompts: [
+        BASE_PROMPT,
+        `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
+      ],
+      uiPrompts: [reactBasePrompt],
     });
   }
 });
