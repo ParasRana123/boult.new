@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { StepsList } from '../components/StepsList';
 import { FileExplorer } from '../components/FileExplorer';
 import { TabView } from '../components/TabView';
@@ -11,7 +11,7 @@ import { BACKEND_URL } from '../config';
 import { parseXml } from '../steps';
 import { useWebContainer } from '../hooks/useWebContainer';
 import { Loader } from '../components/Loader';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, Send, Sparkles, ArrowLeft, Terminal } from 'lucide-react';
 
 function applyStepsToFiles(existingFiles: FileItem[], stepsToApply: Step[]): FileItem[] {
   const rootFiles: FileItem[] = JSON.parse(JSON.stringify(existingFiles));
@@ -80,7 +80,8 @@ async function sleep(ms: number) {
 
 export function Builder() {
   const location = useLocation();
-  const { prompt } = location.state as { prompt: string };
+  const navigate = useNavigate();
+  const { prompt } = (location.state as { prompt: string }) || { prompt: "React application" };
   const [userPrompt, setPrompt] = useState("");
   const [llmMessages, setLlmMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -241,9 +242,6 @@ export function Builder() {
 
   /**
    * Real-Time Streaming Chat Request Engine
-   * Receives tokens directly from SSE stream, parses progressive XML steps,
-   * live-updates the CodeEditor character-by-character, marks active steps with spinners,
-   * and auto-advances to each file as it streams in from Gemini.
    */
   const executeChatRequest = async (
     messagesToSend: { role: string; content: string }[],
@@ -457,23 +455,58 @@ export function Builder() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col">
-      <header className="bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-100">Website Builder</h1>
-          <p className="text-sm text-gray-400 mt-1">Prompt: {prompt}</p>
-        </div>
-        {isWritingCode && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-900/50 border border-purple-500/60 text-purple-200 text-xs font-mono shadow-lg animate-pulse">
-            <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping" />
-            <span>AI writing files & code live in real-time...</span>
+    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col antialiased selection:bg-purple-900 selection:text-purple-200">
+      {/* Top Navigation Header */}
+      <header className="bg-gray-900/90 backdrop-blur-md border-b border-gray-800 px-6 py-3.5 flex items-center justify-between sticky top-0 z-30 shadow-sm">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => navigate('/')}
+            className="p-1.5 rounded-lg bg-gray-800 hover:bg-gray-750 text-gray-400 hover:text-gray-200 transition-colors border border-gray-700/60"
+            title="Back to home"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-md shadow-purple-900/30">
+              <Terminal className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold bg-gradient-to-r from-purple-300 via-indigo-200 to-white bg-clip-text text-transparent">
+                  Boult.new
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-950 text-purple-300 border border-purple-800/60">
+                  v2.0
+                </span>
+              </div>
+            </div>
           </div>
-        )}
+
+          <div className="hidden md:flex items-center gap-2 pl-4 border-l border-gray-800">
+            <span className="text-xs text-gray-500 font-mono">Prompt:</span>
+            <span className="text-xs text-gray-300 bg-gray-800/80 px-2.5 py-1 rounded-md border border-gray-700/60 max-w-md truncate">
+              {prompt}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {isWritingCode && (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-purple-950/80 border border-purple-500/60 text-purple-200 text-xs font-mono shadow-md shadow-purple-950/40">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
+              </span>
+              <span>AI Streaming Active</span>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* Error notification banner if API limit or network failure */}
       {errorMessage && (
-        <div className="bg-red-950/80 border-b border-red-800/80 px-6 py-2.5 flex items-center justify-between text-red-200 text-sm">
+        <div className="bg-red-950/90 border-b border-red-800/80 px-6 py-2.5 flex items-center justify-between text-red-200 text-xs">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
             <span>{errorMessage}</span>
@@ -486,7 +519,7 @@ export function Builder() {
                 init();
               }
             }}
-            className="flex items-center gap-1.5 px-3 py-1 bg-red-800 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 bg-red-800 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors shadow-sm"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Retry
@@ -494,56 +527,91 @@ export function Builder() {
         </div>
       )}
 
-      <div className="flex-1 overflow-hidden">
-        <div className="h-full grid grid-cols-4 gap-6 p-6">
-          <div className="col-span-1 space-y-6 overflow-auto">
-            <div className="flex flex-col h-full">
-              <div className="max-h-[72vh] overflow-y-auto pr-1">
-                <StepsList
-                  steps={steps}
-                  currentStep={currentStep}
-                  onStepClick={handleStepClick}
-                />
-              </div>
-
-              <div className="mt-4">
-                {(loading || statusMessage) && (
-                  <div className="flex items-center gap-2 mb-2 text-xs text-purple-300 font-mono bg-purple-950/40 p-2 rounded border border-purple-900/50">
-                    <Loader />
-                    <span className="truncate">{statusMessage || "Processing..."}</span>
-                  </div>
-                )}
-                {!loading && !isWritingCode && templateSet && (
-                  <div className="flex gap-2">
-                    <textarea
-                      value={userPrompt}
-                      placeholder="Ask follow-up changes or add features..."
-                      onChange={e => setPrompt(e.target.value)}
-                      className="p-2 w-full bg-gray-800 text-gray-100 border border-gray-700 rounded-md focus:outline-none focus:border-purple-500 text-sm placeholder-gray-500"
-                      rows={2}
-                    />
-                    <button
-                      onClick={async () => {
-                        if (!userPrompt.trim() || loading || isWritingCode) return;
-                        const newMessage = {
-                          role: 'user' as const,
-                          content: userPrompt.trim(),
-                        };
-                        setPrompt('');
-
-                        await executeChatRequest([...llmMessages, newMessage], steps);
-                      }}
-                      className="bg-purple-600 hover:bg-purple-700 text-white font-medium px-4 rounded-md transition-colors text-sm shadow-md"
-                    >
-                      Send
-                    </button>
-                  </div>
-                )}
-              </div>
+      {/* Main Workspace Layout */}
+      <div className="flex-1 overflow-hidden p-5">
+        <div className="h-full grid grid-cols-12 gap-5">
+          {/* Left Column: Build Steps & Prompt Box */}
+          <div className="col-span-12 lg:col-span-3 flex flex-col h-full overflow-hidden space-y-4">
+            <div className="flex-1 min-h-0">
+              <StepsList
+                steps={steps}
+                currentStep={currentStep}
+                onStepClick={handleStepClick}
+              />
             </div>
+
+            {/* Bottom Status / Live Activity Widget */}
+            {(loading || statusMessage || isWritingCode) && (
+              <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-purple-950/50 via-gray-900/90 to-purple-950/50 p-3 border border-purple-500/30 shadow-lg shadow-purple-950/40">
+                <div className="flex items-center gap-3">
+                  <div className="relative flex items-center justify-center w-6 h-6 rounded-lg bg-purple-900/80 border border-purple-500/40 flex-shrink-0">
+                    <Loader size="xs" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-purple-400 font-semibold">
+                        {isWritingCode ? "Live Streaming" : "Initializing"}
+                      </span>
+                      <span className="flex h-1.5 w-1.5 rounded-full bg-purple-400 animate-ping" />
+                    </div>
+                    <p className="text-xs font-mono text-gray-200 truncate mt-0.5 font-medium">
+                      {statusMessage || "Writing project code..."}
+                    </p>
+                  </div>
+                </div>
+                {/* Progress bar shimmer */}
+                <div className="mt-2.5 w-full bg-gray-800/80 h-1 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-purple-500 via-indigo-400 to-purple-500 rounded-full animate-pulse w-full" />
+                </div>
+              </div>
+            )}
+
+            {/* Follow-up Prompt Box */}
+            {!loading && !isWritingCode && templateSet && (
+              <div className="rounded-xl bg-gray-900 border border-gray-800 p-2.5 shadow-md focus-within:border-purple-500/60 focus-within:ring-1 focus-within:ring-purple-500/30 transition-all">
+                <textarea
+                  value={userPrompt}
+                  placeholder="Ask follow-up changes or add new features..."
+                  onChange={e => setPrompt(e.target.value)}
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      if (!userPrompt.trim() || loading || isWritingCode) return;
+                      const newMessage = {
+                        role: 'user' as const,
+                        content: userPrompt.trim(),
+                      };
+                      setPrompt('');
+                      await executeChatRequest([...llmMessages, newMessage], steps);
+                    }
+                  }}
+                  className="p-2 w-full bg-transparent text-gray-100 placeholder-gray-500 text-xs focus:outline-none resize-none"
+                  rows={2}
+                />
+                <div className="flex items-center justify-between pt-2 border-t border-gray-800/80">
+                  <span className="text-[10px] text-gray-500 font-mono">Ctrl+Enter to send</span>
+                  <button
+                    onClick={async () => {
+                      if (!userPrompt.trim() || loading || isWritingCode) return;
+                      const newMessage = {
+                        role: 'user' as const,
+                        content: userPrompt.trim(),
+                      };
+                      setPrompt('');
+                      await executeChatRequest([...llmMessages, newMessage], steps);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium text-xs shadow-md shadow-purple-900/40 transition-all active:scale-95"
+                  >
+                    <Send className="w-3 h-3" />
+                    Send
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="col-span-1">
+          {/* Middle Column: File Explorer */}
+          <div className="col-span-12 lg:col-span-3 h-full overflow-hidden">
             <FileExplorer 
               files={files} 
               selectedFile={selectedFile}
@@ -554,9 +622,10 @@ export function Builder() {
             />
           </div>
 
-          <div className="col-span-2 bg-gray-900 rounded-lg shadow-lg p-4 h-[calc(100vh-8rem)]">
+          {/* Right Column: Code Editor & Live Preview */}
+          <div className="col-span-12 lg:col-span-6 bg-gray-900 rounded-xl shadow-xl p-4 border border-gray-800 h-full flex flex-col overflow-hidden">
             <TabView activeTab={activeTab} onTabChange={setActiveTab} />
-            <div className="h-[calc(100%-4rem)]">
+            <div className="flex-1 min-h-0">
               {activeTab === 'code' ? (
                 <CodeEditor file={selectedFile} isWriting={isWritingCode} />
               ) : (
