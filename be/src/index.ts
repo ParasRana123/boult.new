@@ -5,13 +5,17 @@ import { basePrompt as nodeBasePrompt } from "./defaults/node.js";
 import { basePrompt as reactBasePrompt } from "./defaults/react.js";
 import cors from 'cors';
 
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
 // Load environment variables
 config();
-const GROQ_API_KEY: string = process.env.GROQ_API_KEY || "";
+const GEMINI_API_KEY: string = process.env.GEMINI_API_KEY || "";
 
-if (!GROQ_API_KEY) {
-  throw new Error("Missing GROQ_API_KEY in environment variables.");
+if (!GEMINI_API_KEY) {
+  throw new Error("Missing GEMINI_API_KEY in environment variables.");
 }
+
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const app = express();
 app.use(express.json());
