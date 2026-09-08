@@ -73,7 +73,6 @@ function findFileByPath(files: FileItem[], path: string): FileItem | null {
   return null;
 }
 
-// Fast typewriter helper for template initialization
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -95,7 +94,7 @@ export function Builder() {
 
   const [steps, setSteps] = useState<Step[]>([]);
   const [files, setFiles] = useState<FileItem[]>([]);
-  const completedBaseStepsRef = useRef<Step[]>([]);
+  const allCompletedStepsRef = useRef<Step[]>([]);
 
   // Update selectedFilePathRef when selectedFile changes
   useEffect(() => {
@@ -157,59 +156,100 @@ export function Builder() {
     }
   };
 
-  const updateStreamingState = (
-    baseSteps: Step[],
-    streamedSteps: Step[],
-    isComplete: boolean = false
-  ) => {
-    // Re-index steps to ensure unique sequential IDs
-    const combinedSteps: Step[] = [
-      ...baseSteps,
-      ...streamedSteps.map((s, idx) => ({
-        ...s,
-        id: baseSteps.length + idx + 1,
-      })),
-    ];
+  /**
+   * Unified Sequential Step & Progressive File Typewriter Engine
+   * Executes every incoming step one-by-one:
+   * 1. Switches to code editor & selects active file
+   * 2. Sets step to in-progress (triggering right-aligned loader)
+   * 3. Streams code into editor character-by-character
+   * 4. Marks step as completed with green checkmark
+   * 5. Automatically moves to next step
+   */
+  const playSequentialSteps = async (
+    incomingSteps: Step[],
+    baseSteps: Step[] = []
+  ): Promise<Step[]> => {
+    setIsWritingCode(true);
+    let allSteps: Step[] = [...baseSteps];
+    let currentFiles: FileItem[] = applyStepsToFiles([], baseSteps);
 
-    setSteps(combinedSteps);
+    // Filter out duplicate root "Project Files" folder if base steps already have one
+    const stepsToAnimate = incomingSteps.filter(s => {
+      if (s.type === StepType.CreateFolder && s.title === 'Project Files' && baseSteps.length > 0) {
+        return false;
+      }
+      return true;
+    });
 
-    // Apply file changes progressively
-    const updatedFiles = applyStepsToFiles([], combinedSteps);
-    setFiles(updatedFiles);
+    for (let i = 0; i < stepsToAnimate.length; i++) {
+      const rawStep = stepsToAnimate[i];
+      const stepId = allSteps.length + 1;
 
-    // Find the currently active in-progress step
-    const activeStreamStep = streamedSteps.find(s => s.status === 'in-progress');
-    
-    if (activeStreamStep) {
-      setIsWritingCode(true);
-      const activeStepId = baseSteps.length + streamedSteps.indexOf(activeStreamStep) + 1;
-      setCurrentStep(activeStepId);
+      // 1. Activate this step and switch editor to code tab
+      setCurrentStep(stepId);
       setActiveTab('code');
 
-      if (activeStreamStep.path) {
-        const activePath = activeStreamStep.path.startsWith('/') ? activeStreamStep.path : `/${activeStreamStep.path}`;
-        const activeFile = findFileByPath(updatedFiles, activePath);
-        if (activeFile) {
-          setSelectedFile(activeFile);
+      const inProgressStep: Step = {
+        ...rawStep,
+        id: stepId,
+        status: 'in-progress',
+        code: '',
+      };
+
+      allSteps.push(inProgressStep);
+      setSteps([...allSteps]);
+
+      if (rawStep.type === StepType.CreateFile && rawStep.path) {
+        const normalizedPath = rawStep.path.startsWith('/') ? rawStep.path : `/${rawStep.path}`;
+        const fullCode = rawStep.code || '';
+
+        // Progressive typewriter streaming into the file
+        const totalLen = fullCode.length;
+        const stepDelay = Math.min(22, Math.max(6, Math.floor(400 / Math.max(1, totalLen / 35))));
+        const chunkSize = Math.max(15, Math.floor(totalLen / 30));
+
+        for (let pos = 0; pos < totalLen; pos += chunkSize) {
+          const partialCode = fullCode.slice(0, pos + chunkSize);
+          inProgressStep.code = partialCode;
+
+          currentFiles = applyStepsToFiles([], allSteps);
+          setFiles([...currentFiles]);
+
+          const activeFile = findFileByPath(currentFiles, normalizedPath);
+          if (activeFile) {
+            setSelectedFile(activeFile);
+          }
+          await sleep(stepDelay);
         }
-      }
-    } else {
-      setIsWritingCode(!isComplete);
-      if (selectedFilePathRef.current) {
-        const current = findFileByPath(updatedFiles, selectedFilePathRef.current);
-        if (current) {
-          setSelectedFile(current);
+
+        inProgressStep.code = fullCode;
+        currentFiles = applyStepsToFiles([], allSteps);
+        setFiles([...currentFiles]);
+
+        const finalFile = findFileByPath(currentFiles, normalizedPath);
+        if (finalFile) {
+          setSelectedFile(finalFile);
         }
+      } else {
+        await sleep(80);
       }
+
+      // 2. Mark this step completed
+      inProgressStep.status = 'completed';
+      setSteps([...allSteps]);
+      allCompletedStepsRef.current = [...allSteps];
+      await sleep(100); // Brief pause before advancing to next step
     }
+
+    setIsWritingCode(false);
+    return allSteps;
   };
 
-  const streamChatResponse = async (
+  const executeChatRequest = async (
     messagesToSend: { role: string; content: string }[],
     baseSteps: Step[] = []
   ) => {
     setLoading(true);
-    setIsWritingCode(true);
 
     try {
       const response = await fetch(`${BACKEND_URL}/chat`, {
@@ -252,19 +292,19 @@ export function Builder() {
             const chunk = parsed.chunk || parsed.choices?.[0]?.delta?.content || '';
             if (chunk) {
               accumulatedText += chunk;
-              const progressiveSteps = parseXml(accumulatedText, false);
-              updateStreamingState(baseSteps, progressiveSteps, false);
             }
           } catch (e) {
-            // Partial JSON chunk ignored
+            // Partial chunk
           }
         }
       }
 
-      // Finalize full artifact steps
-      const finalSteps = parseXml(accumulatedText, true);
-      updateStreamingState(baseSteps, finalSteps, true);
-      setIsWritingCode(false);
+      // Parse all generated steps from the complete AI response
+      const generatedSteps = parseXml(accumulatedText, true);
+
+      // Play each newly generated file step-by-step through the typewriter animation engine
+      const finalCompletedSteps = await playSequentialSteps(generatedSteps, baseSteps);
+      allCompletedStepsRef.current = finalCompletedSteps;
 
       setLlmMessages(prev => [
         ...prev,
@@ -279,65 +319,6 @@ export function Builder() {
     }
   };
 
-  // Animate template steps step-by-step so the user sees each template file created
-  const playTemplateAnimation = async (templateSteps: Step[]): Promise<Step[]> => {
-    setIsWritingCode(true);
-    let animatedFiles: FileItem[] = [];
-    const activeSteps: Step[] = [];
-
-    for (let i = 0; i < templateSteps.length; i++) {
-      const step = templateSteps[i];
-      const stepId = i + 1;
-      setCurrentStep(stepId);
-      setActiveTab('code');
-
-      // Add as in-progress step
-      const inProgressStep: Step = {
-        ...step,
-        id: stepId,
-        status: 'in-progress',
-      };
-      
-      activeSteps.push(inProgressStep);
-      setSteps([...activeSteps]);
-
-      if (step.type === StepType.CreateFile && step.path) {
-        const normalizedPath = step.path.startsWith('/') ? step.path : `/${step.path}`;
-        const fullCode = step.code || '';
-        
-        // Progressive typing in chunks
-        const chunkSize = Math.max(20, Math.floor(fullCode.length / 8));
-        for (let pos = 0; pos < fullCode.length; pos += chunkSize) {
-          const partialCode = fullCode.slice(0, pos + chunkSize);
-          inProgressStep.code = partialCode;
-          
-          animatedFiles = applyStepsToFiles([], activeSteps);
-          setFiles([...animatedFiles]);
-
-          const activeFile = findFileByPath(animatedFiles, normalizedPath);
-          if (activeFile) {
-            setSelectedFile(activeFile);
-          }
-          await sleep(25);
-        }
-        
-        inProgressStep.code = fullCode;
-      } else {
-        await sleep(60);
-      }
-
-      // Complete this step
-      inProgressStep.status = 'completed';
-      animatedFiles = applyStepsToFiles([], activeSteps);
-      setFiles([...animatedFiles]);
-      setSteps([...activeSteps]);
-      await sleep(40);
-    }
-
-    setIsWritingCode(false);
-    return activeSteps;
-  };
-
   async function init() {
     try {
       const response = await axios.post(`${BACKEND_URL}/template`, {
@@ -347,21 +328,19 @@ export function Builder() {
 
       const { prompts, uiPrompts } = response.data;
 
-      // Parse template steps
+      // 1. Animate template steps step-by-step
       const rawTemplateSteps = parseXml(uiPrompts[0], true);
-      
-      // Animate template steps step-by-step
-      const animatedBaseSteps = await playTemplateAnimation(rawTemplateSteps);
-      completedBaseStepsRef.current = animatedBaseSteps;
+      const animatedBaseSteps = await playSequentialSteps(rawTemplateSteps, []);
+      allCompletedStepsRef.current = animatedBaseSteps;
 
-      // Start real-time streaming chat for the user prompt
+      // 2. Request AI custom code and animate all custom folders/files step-by-step
       const initialMessages = [...prompts, prompt].map(content => ({
         role: 'user',
         content,
       }));
 
       setLlmMessages(initialMessages.map(m => ({ role: 'user', content: m.content })));
-      await streamChatResponse(initialMessages, animatedBaseSteps);
+      await executeChatRequest(initialMessages, animatedBaseSteps);
     } catch (err) {
       console.error('Initialization error:', err);
       setLoading(false);
@@ -383,7 +362,7 @@ export function Builder() {
         {isWritingCode && (
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-purple-900/40 border border-purple-500/50 text-purple-300 text-xs font-mono animate-pulse">
             <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" />
-            <span>AI streaming code live...</span>
+            <span>AI writing files & code step-by-step...</span>
           </div>
         )}
       </header>
@@ -407,7 +386,7 @@ export function Builder() {
                     <span>Preparing next generation...</span>
                   </div>
                 )}
-                {!loading && templateSet && (
+                {!loading && !isWritingCode && templateSet && (
                   <div className="flex gap-2">
                     <textarea
                       value={userPrompt}
@@ -418,14 +397,14 @@ export function Builder() {
                     />
                     <button
                       onClick={async () => {
-                        if (!userPrompt.trim() || loading) return;
+                        if (!userPrompt.trim() || loading || isWritingCode) return;
                         const newMessage = {
                           role: 'user',
                           content: userPrompt.trim(),
                         };
                         setPrompt('');
 
-                        await streamChatResponse([...llmMessages, newMessage], steps);
+                        await executeChatRequest([...llmMessages, newMessage], steps);
                       }}
                       className="bg-purple-600 hover:bg-purple-700 text-white font-medium px-4 rounded-md transition-colors text-sm shadow-md"
                     >
