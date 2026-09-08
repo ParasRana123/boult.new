@@ -221,6 +221,31 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
-});
+});
+
+server.on("error", (err: any) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`\n❌ Error: Port ${PORT} is already in use by another process.`);
+    console.error(`To resolve this:\n1. Stop the process currently running on port ${PORT}\n2. Or set a different port in your .env (e.g. PORT=3001)\n`);
+  } else {
+    console.error("Server error:", err);
+  }
+  process.exit(1);
+});
+
+// Clean shutdown listeners
+process.on("SIGINT", () => {
+  console.log("\nShutting down server gracefully...");
+  server.close(() => {
+    process.exit(0);
+  });
+});
+
+process.on("SIGTERM", () => {
+  console.log("\nShutting down server gracefully...");
+  server.close(() => {
+    process.exit(0);
+  });
+});
