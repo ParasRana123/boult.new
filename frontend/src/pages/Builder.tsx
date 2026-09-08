@@ -440,6 +440,7 @@ export function Builder() {
           <div className="col-span-1">
             <FileExplorer 
               files={files} 
+              selectedFile={selectedFile}
               onFileSelect={(file) => {
                 setSelectedFile(file);
                 setActiveTab('code');
