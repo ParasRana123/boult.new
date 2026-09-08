@@ -1,10 +1,9 @@
 import { config } from "dotenv";
 import express, { Request, Response } from "express";
-import { BASE_PROMPT , getSystemPrompt } from "./prompts.js";
+import { BASE_PROMPT, getSystemPrompt } from "./prompts.js";
 import { basePrompt as nodeBasePrompt } from "./defaults/node.js";
 import { basePrompt as reactBasePrompt } from "./defaults/react.js";
 import cors from 'cors';
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Load environment variables
@@ -18,6 +17,14 @@ if (!GEMINI_API_KEY) {
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const PORT = process.env.PORT || 3000;
 
+// High-performance candidate models pool with individual quota buckets
+const CANDIDATE_MODELS = [
+  "gemini-3.7-flash",
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.6-flash",
+];
+
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -28,39 +35,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper to execute Gemini API calls with exponential backoff on transient errors & rate limits
-async function callWithRetry<T>(
-  operationName: string,
-  fn: () => Promise<T>,
-  maxRetries: number = 3,
-  baseDelayMs: number = 2000
-): Promise<T> {
-  let lastError: any;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err: any) {
-      lastError = err;
-      const errMsg = String(err?.message || err);
-      const isRateLimit =
-        errMsg.includes("429") ||
-        errMsg.includes("quota") ||
-        errMsg.includes("Resource has been exhausted") ||
-        errMsg.includes("Too Many Requests");
-      const isTransient = isRateLimit || errMsg.includes("503") || errMsg.includes("500") || errMsg.includes("fetch failed");
-
-      console.warn(`[Gemini ${operationName} Attempt ${attempt}/${maxRetries}] Error: ${errMsg}`);
-
-      if (attempt < maxRetries && isTransient) {
-        const delay = baseDelayMs * attempt;
-        console.log(`[Gemini ${operationName}] Backing off for ${delay}ms before attempt ${attempt + 1}...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      } else {
-        throw err;
-      }
-    }
+// Helper to extract retry delay in seconds from Gemini error messages
+function extractRetryDelaySeconds(err: any): number {
+  const errMsg = String(err?.message || err);
+  const matchSeconds =
+    errMsg.match(/retry in ([0-9.]+)s/i) ||
+    errMsg.match(/retryDelay["']?:\s*["']?([0-9.]+)s?/i) ||
+    errMsg.match(/Retry after ([0-9.]+) seconds/i);
+  if (matchSeconds) {
+    return Math.ceil(parseFloat(matchSeconds[1])) || 30;
   }
-  throw lastError;
+  return 30;
 }
 
 // Health check endpoint
@@ -68,88 +53,52 @@ app.get("/health", (req: Request, res: Response): void => {
   res.json({
     status: "ok",
     provider: "gemini",
-    model: "gemini-3.6-flash",
+    models: CANDIDATE_MODELS,
     timestamp: new Date().toISOString(),
   });
 });
 
+/**
+ * Fast project classification with heuristic detection to conserve API quotas
+ */
 app.post("/template", async (req: Request, res: Response): Promise<void> => {
-  const prompt: string = (req.body.prompt || "").trim();
+  const prompt: string = (req.body.prompt || "").trim().toLowerCase();
   let answer = "react";
 
-  try {
-    if (prompt) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: "gemini-3.6-flash",
-          systemInstruction:
-            "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
-        });
-
-        const result = await callWithRetry(
-          "template-classification",
-          () => model.generateContent(prompt),
-          2,
-          1000
-        );
-        const content = result.response.text();
-        console.log("Gemini Template raw response:", content);
-
-        const extracted = content.trim().toLowerCase().replace(/[^a-z]/g, "");
-        if (extracted.includes("node") || extracted.includes("react")) {
-          answer = extracted;
-        }
-      } catch (classifyErr: any) {
-        console.warn(
-          "Gemini classification failed/rate-limited, falling back to heuristic:",
-          classifyErr?.message || classifyErr
-        );
-        // Heuristic fallback
-        const lower = prompt.toLowerCase();
-        if (
-          lower.includes("node") ||
-          lower.includes("express") ||
-          lower.includes("backend only") ||
-          lower.includes("cli")
-        ) {
-          answer = "node";
-        } else {
-          answer = "react";
-        }
-      }
+  if (prompt) {
+    if (
+      prompt.includes("node") ||
+      prompt.includes("express") ||
+      prompt.includes("backend only") ||
+      prompt.includes("api server") ||
+      prompt.includes("cli")
+    ) {
+      answer = "node";
+    } else {
+      answer = "react";
     }
-
-    console.log("Resolved project template:", answer);
-
-    if (answer.includes("node")) {
-      res.json({
-        prompts: [
-          `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files. \nConsider the contents of ALL files in the project.\n\n${nodeBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
-        ],
-        uiPrompts: [nodeBasePrompt],
-      });
-      return;
-    }
-
-    // Default to react
-    res.json({
-      prompts: [
-        BASE_PROMPT,
-        `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
-      ],
-      uiPrompts: [reactBasePrompt],
-    });
-  } catch (err: any) {
-    console.error("Critical error in /template fallback:", err);
-    // Absolute fallback - never fail with 500
-    res.json({
-      prompts: [
-        BASE_PROMPT,
-        `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
-      ],
-      uiPrompts: [reactBasePrompt],
-    });
   }
+
+  console.log(`[Template Endpoint] Classified project for prompt "${prompt.slice(0, 40)}..." as: ${answer}`);
+
+  if (answer === "node") {
+    res.json({
+      prompts: [
+        `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files. \nConsider the contents of ALL files in the project.\n\n${nodeBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
+      ],
+      uiPrompts: [nodeBasePrompt],
+    });
+    return;
+  }
+
+  // Default to React
+  res.json({
+    prompts: [
+      BASE_PROMPT,
+      `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
+    ],
+    uiPrompts: [reactBasePrompt],
+  });
 });
 
 interface ChatMessage {
@@ -189,6 +138,46 @@ export function formatMessagesForGemini(messages: ChatMessage[]): GeminiContent[
   return formatted;
 }
 
+/**
+ * Execute Gemini Stream with Multi-Model Quota Failover Pool
+ */
+async function streamWithModelFailover(contents: GeminiContent[]) {
+  let lastError: any;
+
+  for (const modelName of CANDIDATE_MODELS) {
+    try {
+      console.log(`[Gemini Stream] Requesting content with candidate: ${modelName}...`);
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: getSystemPrompt(),
+      });
+      const streamResult = await model.generateContentStream({ contents });
+      return { streamResult, modelName };
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = String(err?.message || err);
+      const isQuotaOrTransient =
+        errMsg.includes("429") ||
+        errMsg.includes("quota") ||
+        errMsg.includes("Resource has been exhausted") ||
+        errMsg.includes("Too Many Requests") ||
+        errMsg.includes("503") ||
+        errMsg.includes("404");
+
+      console.warn(`[Gemini Failover] Model ${modelName} encountered error: ${errMsg.slice(0, 150)}`);
+
+      if (isQuotaOrTransient) {
+        // Cascade to the next model in the candidate list
+        console.log(`[Gemini Failover] Quota exhausted for ${modelName}. Falling back to next available model in pool...`);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError;
+}
+
 app.post("/chat", async (req: Request, res: Response): Promise<void> => {
   try {
     const messages = req.body.messages || [];
@@ -200,15 +189,9 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3.6-flash",
-      systemInstruction: getSystemPrompt(),
-    });
-
     if (isStreaming) {
-      const streamResult = await callWithRetry("chat-stream-init", () =>
-        model.generateContentStream({ contents })
-      );
+      const { streamResult, modelName } = await streamWithModelFailover(contents);
+      console.log(`[Gemini Stream] Successfully connected stream using model: ${modelName}`);
 
       // Set SSE headers after stream initializes successfully
       res.setHeader("Content-Type", "text/event-stream");
@@ -235,44 +218,74 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
         }
       }
 
-      console.log("Gemini Streamed Chat Response length:", fullResponse.length);
+      console.log(`[Gemini Stream] Finished stream from ${modelName}. Total length: ${fullResponse.length}`);
       res.write("data: [DONE]\n\n");
       res.end();
       return;
     }
 
-    // Non-streaming fallback
-    const result = await callWithRetry("chat-generate", () =>
-      model.generateContent({ contents })
-    );
+    // Non-streaming fallback with model failover
+    let nonStreamResponse = "";
+    let usedModel = "";
+    let lastErr: any;
 
-    const responseText = result.response.text();
-    console.log("Gemini Chat Response length:", responseText.length);
+    for (const modelName of CANDIDATE_MODELS) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: getSystemPrompt(),
+        });
+        const result = await model.generateContent({ contents });
+        nonStreamResponse = result.response.text();
+        usedModel = modelName;
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`[Gemini Failover non-stream] Model ${modelName} failed, trying next...`);
+      }
+    }
+
+    if (!nonStreamResponse) {
+      throw lastErr || new Error("All candidate Gemini models failed to generate content.");
+    }
 
     res.json({
-      response: responseText,
+      model: usedModel,
+      response: nonStreamResponse,
       choices: [
         {
           message: {
             role: "assistant",
-            content: responseText,
+            content: nonStreamResponse,
           },
         },
       ],
     });
   } catch (err: any) {
     console.error("Unexpected error in /chat:", err);
-    const isRateLimit = String(err?.message || "").includes("429") || String(err?.message || "").includes("quota") || String(err?.message || "").includes("Too Many Requests");
+    const errMsg = String(err?.message || err);
+    const isRateLimit =
+      errMsg.includes("429") ||
+      errMsg.includes("quota") ||
+      errMsg.includes("Resource has been exhausted") ||
+      errMsg.includes("Too Many Requests");
+    const retryDelay = isRateLimit ? extractRetryDelaySeconds(err) : 10;
     const statusCode = isRateLimit ? 429 : 500;
 
+    const errorPayload = {
+      error: isRateLimit
+        ? `Gemini API rate limit reached. All model pools exhausted. Auto-retry in ${retryDelay}s.`
+        : "Unexpected error occurred during generation.",
+      details: errMsg,
+      isRateLimit,
+      retryDelay,
+    };
+
     if (res.headersSent) {
-      res.write(`data: ${JSON.stringify({ error: err?.message || String(err), isRateLimit })}\n\n`);
+      res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
       res.end();
     } else {
-      res.status(statusCode).json({
-        error: isRateLimit ? "Gemini API rate limit reached. Please wait a moment and try again." : "Unexpected error occurred",
-        details: err?.message || String(err),
-      });
+      res.status(statusCode).json(errorPayload);
     }
   }
 });
