@@ -21,6 +21,34 @@ app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
 });
+// Helper to execute Gemini API calls with exponential backoff on transient errors & rate limits
+async function callWithRetry(operationName, fn, maxRetries = 3, baseDelayMs = 2000) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        }
+        catch (err) {
+            lastError = err;
+            const errMsg = String(err?.message || err);
+            const isRateLimit = errMsg.includes("429") ||
+                errMsg.includes("quota") ||
+                errMsg.includes("Resource has been exhausted") ||
+                errMsg.includes("Too Many Requests");
+            const isTransient = isRateLimit || errMsg.includes("503") || errMsg.includes("500") || errMsg.includes("fetch failed");
+            console.warn(`[Gemini ${operationName} Attempt ${attempt}/${maxRetries}] Error: ${errMsg}`);
+            if (attempt < maxRetries && isTransient) {
+                const delay = baseDelayMs * attempt;
+                console.log(`[Gemini ${operationName}] Backing off for ${delay}ms before attempt ${attempt + 1}...`);
+                await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+            else {
+                throw err;
+            }
+        }
+    }
+    throw lastError;
+}
 // Health check endpoint
 app.get("/health", (req, res) => {
     res.json({
@@ -41,7 +69,7 @@ app.post("/template", async (req, res) => {
             model: "gemini-3.6-flash",
             systemInstruction: "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
         });
-        const result = await model.generateContent(prompt);
+        const result = await callWithRetry("template-classification", () => model.generateContent(prompt));
         const content = result.response.text();
         console.log("Gemini Template raw response:", content);
         const answer = content.trim().toLowerCase().replace(/[^a-z]/g, "");
@@ -119,7 +147,7 @@ app.post("/chat", async (req, res) => {
             systemInstruction: getSystemPrompt(),
         });
         if (isStreaming) {
-            const streamResult = await model.generateContentStream({ contents });
+            const streamResult = await callWithRetry("chat-stream-init", () => model.generateContentStream({ contents }));
             // Set SSE headers after stream initializes successfully
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-cache");
@@ -148,9 +176,7 @@ app.post("/chat", async (req, res) => {
             return;
         }
         // Non-streaming fallback
-        const result = await model.generateContent({
-            contents,
-        });
+        const result = await callWithRetry("chat-generate", () => model.generateContent({ contents }));
         const responseText = result.response.text();
         console.log("Gemini Chat Response length:", responseText.length);
         res.json({
