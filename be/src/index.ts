@@ -138,6 +138,7 @@ export function formatMessagesForGemini(messages: ChatMessage[]): GeminiContent[
 app.post("/chat", async (req: Request, res: Response): Promise<void> => {
   try {
     const messages = req.body.messages || [];
+    const isStreaming = req.body.stream !== false;
     const contents = formatMessagesForGemini(messages);
 
     if (contents.length === 0) {
@@ -150,6 +151,41 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
       systemInstruction: getSystemPrompt(),
     });
 
+    if (isStreaming) {
+      // Set SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
+
+      const streamResult = await model.generateContentStream({ contents });
+
+      let fullResponse = "";
+
+      for await (const chunk of streamResult.stream) {
+        const chunkText = chunk.text();
+        if (chunkText) {
+          fullResponse += chunkText;
+          const payload = JSON.stringify({
+            chunk: chunkText,
+            choices: [
+              {
+                delta: { content: chunkText },
+              },
+            ],
+          });
+          res.write(`data: ${payload}\n\n`);
+        }
+      }
+
+      console.log("Gemini Streamed Chat Response length:", fullResponse.length);
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
+    // Non-streaming fallback
     const result = await model.generateContent({
       contents,
     });
@@ -157,7 +193,6 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
     const responseText = result.response.text();
     console.log("Gemini Chat Response length:", responseText.length);
 
-    // Return response structure compatible with frontend
     res.json({
       response: responseText,
       choices: [
@@ -171,10 +206,15 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
     });
   } catch (err: any) {
     console.error("Unexpected error in /chat:", err);
-    res.status(500).json({
-      error: "Unexpected error occurred",
-      details: err?.message || String(err),
-    });
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ error: err?.message || String(err) })}\n\n`);
+      res.end();
+    } else {
+      res.status(500).json({
+        error: "Unexpected error occurred",
+        details: err?.message || String(err),
+      });
+    }
   }
 });
 
