@@ -29,75 +29,51 @@ app.post("/template", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { default: fetch } = await import("node-fetch");
-
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama3-8b-8192",
-        stream: false,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
+    const model = genAI.getGenerativeModel({
+      model: "gemini-3.6-flash",
+      systemInstruction:
+        "Return either node or react based on what you think the project should be. Only return a single word either 'node' or 'react'. Do not return anything extra.",
     });
 
-    const json = (await response.json()) as {
-    choices?: { message?: { content?: string } }[];
-    };
+    const result = await model.generateContent(prompt);
+    const content = result.response.text();
 
-    console.log("GROQ API raw response:", JSON.stringify(json, null, 2));
+    console.log("Gemini Template raw response:", content);
 
-    if (!json.choices || !Array.isArray(json.choices) || !json.choices[0]) {
-      res.status(500).json({
-        error: "Invalid response structure from GROQ",
-        data: json,
+    const answer = content.trim().toLowerCase().replace(/[^a-z]/g, "");
+    console.log("Extracted answer:", answer);
+
+    if (answer.includes("react")) {
+      res.json({
+        prompts: [
+          BASE_PROMPT,
+          `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
+        ],
+        uiPrompts: [reactBasePrompt],
       });
       return;
     }
 
-    const content = json.choices[0]?.message?.content;
-    if(!content) {
-      res.status(500).json({
-        error: "Missing data in Groq api response",
-        debugData: json
-      })
+    if (answer.includes("node")) {
+      res.json({
+        prompts: [
+          `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files. \nConsider the contents of ALL files in the project.\n\n${nodeBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
+        ],
+        uiPrompts: [nodeBasePrompt],
+      });
       return;
     }
 
-    const answer = content.trim().toLowerCase();
-    console.log("Extracted answer" , answer);
-
-    if (answer === "react") {
-      res.json({ prompts: [BASE_PROMPT, `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`] , 
-                 uiPrompts: [reactBasePrompt] });
-      return;
-    }
-
-    if (answer === "node") {
-      res.json({ prompts: [`Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files. \nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`] , 
-                 uiPrompts: [nodeBasePrompt]});
-      return;
-    }
-
-    res.status(403).json({
-      message: "Unexpected classification result",
-      debugAnswer: answer,
+    // Default fallback to react if ambiguous
+    res.json({
+      prompts: [
+        BASE_PROMPT,
+        `Here is an artifact that contains all files of the project visible to you.\n You should ALWAYS CONSIDER all the files.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
+      ],
+      uiPrompts: [reactBasePrompt],
     });
   } catch (err: any) {
-    console.error("Unexpected error:", err);
+    console.error("Unexpected error in /template:", err);
     res.status(500).json({
       error: "Unexpected error occurred",
       details: err?.message || String(err),
