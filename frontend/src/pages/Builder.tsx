@@ -11,6 +11,7 @@ import { BACKEND_URL } from '../config';
 import { parseXml } from '../steps';
 import { useWebContainer } from '../hooks/useWebContainer';
 import { Loader } from '../components/Loader';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
 function applyStepsToFiles(existingFiles: FileItem[], stepsToApply: Step[]): FileItem[] {
   const rootFiles: FileItem[] = JSON.parse(JSON.stringify(existingFiles));
@@ -84,6 +85,8 @@ export function Builder() {
   const [llmMessages, setLlmMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [isWritingCode, setIsWritingCode] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [templateSet, setTemplateSet] = useState(false);
   const webcontainer = useWebContainer();
 
@@ -96,7 +99,7 @@ export function Builder() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const allCompletedStepsRef = useRef<Step[]>([]);
 
-  // Update selectedFilePathRef when selectedFile changes
+  // Keep track of active file path
   useEffect(() => {
     selectedFilePathRef.current = selectedFile ? selectedFile.path : null;
   }, [selectedFile]);
@@ -157,13 +160,7 @@ export function Builder() {
   };
 
   /**
-   * Unified Sequential Step & Progressive File Typewriter Engine
-   * Executes every incoming step one-by-one:
-   * 1. Switches to code editor & selects active file
-   * 2. Sets step to in-progress (triggering right-aligned loader)
-   * 3. Streams code into editor character-by-character
-   * 4. Marks step as completed with green checkmark
-   * 5. Automatically moves to next step
+   * Typewriter playback engine for starter template files
    */
   const playSequentialSteps = async (
     incomingSteps: Step[],
@@ -173,7 +170,7 @@ export function Builder() {
     let allSteps: Step[] = [...baseSteps];
     let currentFiles: FileItem[] = applyStepsToFiles([], baseSteps);
 
-    // Filter out duplicate root "Project Files" folder if base steps already have one
+    // Filter out root "Project Files" folder if base steps already exist
     const stepsToAnimate = incomingSteps.filter(s => {
       if (s.type === StepType.CreateFolder && s.title === 'Project Files' && baseSteps.length > 0) {
         return false;
@@ -185,7 +182,6 @@ export function Builder() {
       const rawStep = stepsToAnimate[i];
       const stepId = allSteps.length + 1;
 
-      // 1. Activate this step and switch editor to code tab
       setCurrentStep(stepId);
       setActiveTab('code');
 
@@ -203,10 +199,9 @@ export function Builder() {
         const normalizedPath = rawStep.path.startsWith('/') ? rawStep.path : `/${rawStep.path}`;
         const fullCode = rawStep.code || '';
 
-        // Progressive typewriter streaming into the file
         const totalLen = fullCode.length;
-        const stepDelay = Math.min(22, Math.max(6, Math.floor(400 / Math.max(1, totalLen / 35))));
-        const chunkSize = Math.max(15, Math.floor(totalLen / 30));
+        const stepDelay = Math.min(20, Math.max(5, Math.floor(350 / Math.max(1, totalLen / 35))));
+        const chunkSize = Math.max(15, Math.floor(totalLen / 25));
 
         for (let pos = 0; pos < totalLen; pos += chunkSize) {
           const partialCode = fullCode.slice(0, pos + chunkSize);
@@ -231,25 +226,35 @@ export function Builder() {
           setSelectedFile(finalFile);
         }
       } else {
-        await sleep(80);
+        await sleep(60);
       }
 
-      // 2. Mark this step completed
       inProgressStep.status = 'completed';
       setSteps([...allSteps]);
       allCompletedStepsRef.current = [...allSteps];
-      await sleep(100); // Brief pause before advancing to next step
+      await sleep(80);
     }
 
     setIsWritingCode(false);
     return allSteps;
   };
 
+  /**
+   * Real-Time Streaming Chat Request Engine
+   * Receives tokens directly from SSE stream, parses progressive XML steps,
+   * live-updates the CodeEditor character-by-character, marks active steps with spinners,
+   * and auto-advances to each file as it streams in from Gemini.
+   */
   const executeChatRequest = async (
     messagesToSend: { role: string; content: string }[],
-    baseSteps: Step[] = []
+    baseSteps: Step[] = [],
+    retryCount: number = 0
   ) => {
     setLoading(true);
+    setIsWritingCode(true);
+    setErrorMessage(null);
+    setStatusMessage("Connecting to Gemini and generating project code...");
+    setActiveTab('code');
 
     try {
       const response = await fetch(`${BACKEND_URL}/chat`, {
@@ -264,14 +269,26 @@ export function Builder() {
         }),
       });
 
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      if (!response.ok) {
+        if (response.status === 429 && retryCount < 3) {
+          const waitTime = (retryCount + 1) * 3;
+          setStatusMessage(`Gemini rate limit reached. Retrying automatically in ${waitTime}s...`);
+          await sleep(waitTime * 1000);
+          return await executeChatRequest(messagesToSend, baseSteps, retryCount + 1);
+        }
+        const errText = await response.text();
+        throw new Error(`Server returned ${response.status}: ${errText}`);
+      }
+
+      if (!response.body) {
+        throw new Error("No response stream available from backend");
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = '';
       let buffer = '';
+      let lastActivePath = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -289,38 +306,124 @@ export function Builder() {
 
           try {
             const parsed = JSON.parse(dataStr);
+            if (parsed.error) {
+              if (parsed.isRateLimit && retryCount < 3) {
+                const waitTime = (retryCount + 1) * 3;
+                setStatusMessage(`Rate limit encountered. Retrying in ${waitTime}s...`);
+                await sleep(waitTime * 1000);
+                return await executeChatRequest(messagesToSend, baseSteps, retryCount + 1);
+              }
+              setErrorMessage(parsed.error);
+              continue;
+            }
+
             const chunk = parsed.chunk || parsed.choices?.[0]?.delta?.content || '';
             if (chunk) {
               accumulatedText += chunk;
+
+              // Parse live steps in progress
+              const liveParsedSteps = parseXml(accumulatedText, false);
+
+              if (liveParsedSteps.length > 0) {
+                // Filter out root project folder step if base steps exist
+                const cleanGenerated = liveParsedSteps.filter(s => {
+                  if (s.type === StepType.CreateFolder && (s.title === 'Project Files' || s.title?.includes('Files')) && baseSteps.length > 0) {
+                    return false;
+                  }
+                  return true;
+                });
+
+                // Renumber newly generated steps seamlessly following base steps
+                const mappedGenerated: Step[] = cleanGenerated.map((s, idx) => ({
+                  ...s,
+                  id: baseSteps.length + idx + 1,
+                }));
+
+                const combinedSteps: Step[] = [...baseSteps, ...mappedGenerated];
+                setSteps(combinedSteps);
+
+                // Update file hierarchy with live partial code
+                const updatedFiles = applyStepsToFiles([], combinedSteps);
+                setFiles(updatedFiles);
+
+                // Locate currently active step
+                const currentActiveStep = mappedGenerated[mappedGenerated.length - 1];
+                if (currentActiveStep) {
+                  setCurrentStep(currentActiveStep.id);
+
+                  if (currentActiveStep.path) {
+                    const normalizedPath = currentActiveStep.path.startsWith('/')
+                      ? currentActiveStep.path
+                      : `/${currentActiveStep.path}`;
+
+                    if (normalizedPath !== lastActivePath) {
+                      lastActivePath = normalizedPath;
+                      setStatusMessage(`Writing ${currentActiveStep.path}...`);
+                    }
+
+                    const activeFile = findFileByPath(updatedFiles, normalizedPath);
+                    if (activeFile) {
+                      setSelectedFile(activeFile);
+                    }
+                  }
+                }
+              }
             }
           } catch (e) {
-            // Partial chunk
+            // Partial JSON chunk in stream buffer
           }
         }
       }
 
-      // Parse all generated steps from the complete AI response
-      const generatedSteps = parseXml(accumulatedText, true);
+      // Stream completed: Finalize all steps
+      const finalGeneratedSteps = parseXml(accumulatedText, true);
+      const cleanFinal = finalGeneratedSteps.filter(s => {
+        if (s.type === StepType.CreateFolder && (s.title === 'Project Files' || s.title?.includes('Files')) && baseSteps.length > 0) {
+          return false;
+        }
+        return true;
+      });
 
-      // Play each newly generated file step-by-step through the typewriter animation engine
-      const finalCompletedSteps = await playSequentialSteps(generatedSteps, baseSteps);
-      allCompletedStepsRef.current = finalCompletedSteps;
+      const finalizedMapped: Step[] = cleanFinal.map((s, idx) => ({
+        ...s,
+        id: baseSteps.length + idx + 1,
+        status: 'completed' as const,
+      }));
+
+      const finalAllSteps: Step[] = [...baseSteps, ...finalizedMapped];
+      setSteps(finalAllSteps);
+      allCompletedStepsRef.current = finalAllSteps;
+
+      const finalFiles = applyStepsToFiles([], finalAllSteps);
+      setFiles(finalFiles);
+
+      // Keep last edited file selected or select first file
+      if (lastActivePath) {
+        const lastFile = findFileByPath(finalFiles, lastActivePath);
+        if (lastFile) setSelectedFile(lastFile);
+      }
 
       setLlmMessages(prev => [
         ...prev,
         ...messagesToSend.filter(m => !prev.some(p => p.content === m.content)),
         { role: 'assistant', content: accumulatedText },
       ]);
-    } catch (err) {
+
+      setStatusMessage("");
+    } catch (err: any) {
       console.error('Error during streaming chat:', err);
-      setIsWritingCode(false);
+      setErrorMessage(err?.message || "An unexpected error occurred while generating code.");
     } finally {
+      setIsWritingCode(false);
       setLoading(false);
     }
   };
 
   async function init() {
     try {
+      setLoading(true);
+      setStatusMessage("Analyzing prompt and initializing project scaffold...");
+
       const response = await axios.post(`${BACKEND_URL}/template`, {
         prompt: prompt.trim(),
       });
@@ -328,12 +431,12 @@ export function Builder() {
 
       const { prompts, uiPrompts } = response.data;
 
-      // 1. Animate template steps step-by-step
+      // 1. Animate template steps smoothly step-by-step
       const rawTemplateSteps = parseXml(uiPrompts[0], true);
       const animatedBaseSteps = await playSequentialSteps(rawTemplateSteps, []);
       allCompletedStepsRef.current = animatedBaseSteps;
 
-      // 2. Request AI custom code and animate all custom folders/files step-by-step
+      // 2. Request AI custom code with true real-time token streaming
       const initialMessages = [...prompts, prompt].map(content => ({
         role: 'user',
         content,
@@ -341,8 +444,9 @@ export function Builder() {
 
       setLlmMessages(initialMessages.map(m => ({ role: 'user', content: m.content })));
       await executeChatRequest(initialMessages, animatedBaseSteps);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Initialization error:', err);
+      setErrorMessage(err?.message || "Failed to initialize project template.");
       setLoading(false);
       setIsWritingCode(false);
     }
@@ -360,12 +464,35 @@ export function Builder() {
           <p className="text-sm text-gray-400 mt-1">Prompt: {prompt}</p>
         </div>
         {isWritingCode && (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-purple-900/40 border border-purple-500/50 text-purple-300 text-xs font-mono animate-pulse">
-            <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" />
-            <span>AI writing files & code step-by-step...</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-900/50 border border-purple-500/60 text-purple-200 text-xs font-mono shadow-lg animate-pulse">
+            <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping" />
+            <span>AI writing files & code live in real-time...</span>
           </div>
         )}
       </header>
+
+      {/* Error notification banner if API limit or network failure */}
+      {errorMessage && (
+        <div className="bg-red-950/80 border-b border-red-800/80 px-6 py-2.5 flex items-center justify-between text-red-200 text-sm">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            onClick={() => {
+              if (llmMessages.length > 0) {
+                executeChatRequest(llmMessages, allCompletedStepsRef.current);
+              } else {
+                init();
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 bg-red-800 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden">
         <div className="h-full grid grid-cols-4 gap-6 p-6">
@@ -380,26 +507,26 @@ export function Builder() {
               </div>
 
               <div className="mt-4">
-                {loading && !isWritingCode && (
-                  <div className="flex items-center gap-2 mb-2 text-sm text-purple-400">
+                {(loading || statusMessage) && (
+                  <div className="flex items-center gap-2 mb-2 text-xs text-purple-300 font-mono bg-purple-950/40 p-2 rounded border border-purple-900/50">
                     <Loader />
-                    <span>Preparing next generation...</span>
+                    <span className="truncate">{statusMessage || "Processing..."}</span>
                   </div>
                 )}
                 {!loading && !isWritingCode && templateSet && (
                   <div className="flex gap-2">
                     <textarea
                       value={userPrompt}
-                      placeholder="Ask follow-up changes..."
+                      placeholder="Ask follow-up changes or add features..."
                       onChange={e => setPrompt(e.target.value)}
-                      className="p-2 w-full bg-gray-800 text-gray-100 border border-gray-700 rounded-md focus:outline-none focus:border-purple-500 text-sm"
+                      className="p-2 w-full bg-gray-800 text-gray-100 border border-gray-700 rounded-md focus:outline-none focus:border-purple-500 text-sm placeholder-gray-500"
                       rows={2}
                     />
                     <button
                       onClick={async () => {
                         if (!userPrompt.trim() || loading || isWritingCode) return;
                         const newMessage = {
-                          role: 'user',
+                          role: 'user' as const,
                           content: userPrompt.trim(),
                         };
                         setPrompt('');
