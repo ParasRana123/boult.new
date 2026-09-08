@@ -152,14 +152,14 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
     });
 
     if (isStreaming) {
-      // Set SSE headers
+      const streamResult = await model.generateContentStream({ contents });
+
+      // Set SSE headers after stream initializes successfully
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders?.();
-
-      const streamResult = await model.generateContentStream({ contents });
 
       let fullResponse = "";
 
