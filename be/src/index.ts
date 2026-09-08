@@ -81,6 +81,43 @@ app.post("/template", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+interface ChatMessage {
+  role: string;
+  content: string;
+}
+
+interface GeminiContent {
+  role: "user" | "model";
+  parts: { text: string }[];
+}
+
+export function formatMessagesForGemini(messages: ChatMessage[]): GeminiContent[] {
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    return [];
+  }
+
+  const formatted: GeminiContent[] = [];
+
+  for (const msg of messages) {
+    const role: "user" | "model" = msg.role === "assistant" || msg.role === "model" ? "model" : "user";
+    const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+
+    if (!text || text.trim() === "") continue;
+
+    const last = formatted[formatted.length - 1];
+    if (last && last.role === role) {
+      last.parts.push({ text });
+    } else {
+      formatted.push({
+        role,
+        parts: [{ text }],
+      });
+    }
+  }
+
+  return formatted;
+}
+
 app.post("/chat" , async (req , res) => {
     const messages = req.body.messages;
     const finalMessages = [
