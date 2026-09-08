@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FolderTree, FileCode, ChevronRight, ChevronDown, File } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { FolderTree, FileCode, ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import { FileItem } from '../types';
 
 interface FileExplorerProps {
@@ -19,6 +19,15 @@ function FileNode({ item, depth, selectedFile, onFileClick }: FileNodeProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const isSelected = selectedFile && selectedFile.path === item.path;
 
+  // Automatically expand parent folder if selected/active file is inside it
+  useEffect(() => {
+    if (selectedFile && selectedFile.path && item.type === 'folder') {
+      if (selectedFile.path.startsWith(item.path + '/') || selectedFile.path === item.path) {
+        setIsExpanded(true);
+      }
+    }
+  }, [selectedFile, item.path, item.type]);
+
   const handleClick = () => {
     if (item.type === 'folder') {
       setIsExpanded(!isExpanded);
@@ -32,7 +41,7 @@ function FileNode({ item, depth, selectedFile, onFileClick }: FileNodeProps) {
       <div
         className={`flex items-center gap-2 p-1.5 rounded-md cursor-pointer transition-all text-xs font-mono ${
           isSelected
-            ? 'bg-purple-950/60 text-purple-200 border border-purple-500/50 shadow-sm font-semibold'
+            ? 'bg-purple-950/70 text-purple-200 border border-purple-500/60 shadow-sm font-semibold'
             : 'text-gray-300 hover:bg-gray-800/80 hover:text-gray-100 border border-transparent'
         }`}
         style={{ paddingLeft: `${depth * 1.25 + 0.5}rem` }}
@@ -48,7 +57,11 @@ function FileNode({ item, depth, selectedFile, onFileClick }: FileNodeProps) {
           </span>
         )}
         {item.type === 'folder' ? (
-          <FolderTree className="w-4 h-4 text-purple-400 flex-shrink-0" />
+          isExpanded ? (
+            <FolderOpen className="w-4 h-4 text-purple-400 flex-shrink-0" />
+          ) : (
+            <Folder className="w-4 h-4 text-purple-400 flex-shrink-0" />
+          )
         ) : (
           <FileCode className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-purple-300' : 'text-blue-400'}`} />
         )}
