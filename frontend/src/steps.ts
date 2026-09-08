@@ -1,6 +1,15 @@
 import { Step, StepType } from './types';
 
 /**
+ * Extract attribute value supporting double quotes, single quotes, or unquoted values.
+ */
+function extractAttribute(attrString: string, attrName: string): string | undefined {
+  const regex = new RegExp(`${attrName}=["']?([^"'\\s>]+)["']?`, 'i');
+  const match = attrString.match(regex);
+  return match ? match[1] : undefined;
+}
+
+/**
  * Parse XML response or stream into steps.
  * Handles both fully completed artifacts and in-progress streaming tokens with any attribute ordering.
  */
@@ -26,7 +35,7 @@ export function parseXml(response: string, isStreamingComplete: boolean = false)
   let stepId = 1;
 
   // Extract artifact title if present
-  const titleMatch = response.match(/title="([^"]*)"/);
+  const titleMatch = response.match(/title=["']([^"']*)["']/i);
   const artifactTitle = titleMatch ? titleMatch[1] : 'Project Files';
 
   const isArtifactClosed = artifactEndIndex !== -1 || isStreamingComplete;
@@ -44,17 +53,14 @@ export function parseXml(response: string, isStreamingComplete: boolean = false)
   const completedActionRegex = /<boltAction\s+([^>]+)>([\s\S]*?)<\/boltAction>/g;
 
   let lastIndex = 0;
-  let match;
+  let match: RegExpExecArray | null;
 
   while ((match = completedActionRegex.exec(xmlContent)) !== null) {
     const [, attrString, content] = match;
     lastIndex = completedActionRegex.lastIndex;
 
-    const typeMatch = attrString.match(/type="([^"]*)"/);
-    const pathMatch = attrString.match(/filePath="([^"]*)"/);
-
-    const type = typeMatch ? typeMatch[1] : 'file';
-    const filePath = pathMatch ? pathMatch[1] : undefined;
+    const type = extractAttribute(attrString, 'type') || 'file';
+    const filePath = extractAttribute(attrString, 'filePath');
 
     if (type === 'file') {
       steps.push({
@@ -85,11 +91,8 @@ export function parseXml(response: string, isStreamingComplete: boolean = false)
   if (openActionMatch && !isStreamingComplete) {
     const [, attrString, partialContent] = openActionMatch;
 
-    const typeMatch = attrString.match(/type="([^"]*)"/);
-    const pathMatch = attrString.match(/filePath="([^"]*)"/);
-
-    const type = typeMatch ? typeMatch[1] : 'file';
-    const filePath = pathMatch ? pathMatch[1] : undefined;
+    const type = extractAttribute(attrString, 'type') || 'file';
+    const filePath = extractAttribute(attrString, 'filePath');
 
     if (type === 'file') {
       steps.push({
