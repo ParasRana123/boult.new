@@ -2,7 +2,7 @@ import { Step, StepType } from './types';
 
 /**
  * Parse XML response or stream into steps.
- * Handles both fully completed artifacts and in-progress streaming tokens.
+ * Handles both fully completed artifacts and in-progress streaming tokens with any attribute ordering.
  */
 export function parseXml(response: string, isStreamingComplete: boolean = false): Step[] {
   if (!response || response.trim() === '') {
@@ -40,21 +40,27 @@ export function parseXml(response: string, isStreamingComplete: boolean = false)
     status: isArtifactClosed ? 'completed' : 'in-progress',
   });
 
-  // Regular expression to find completed boltAction elements
-  const completedActionRegex = /<boltAction\s+type="([^"]*)"(?:\s+filePath="([^"]*)")?>([\s\S]*?)<\/boltAction>/g;
+  // Regular expression to find completed boltAction elements regardless of attribute order
+  const completedActionRegex = /<boltAction\s+([^>]+)>([\s\S]*?)<\/boltAction>/g;
 
   let lastIndex = 0;
   let match;
 
   while ((match = completedActionRegex.exec(xmlContent)) !== null) {
-    const [, type, filePath, content] = match;
+    const [, attrString, content] = match;
     lastIndex = completedActionRegex.lastIndex;
+
+    const typeMatch = attrString.match(/type="([^"]*)"/);
+    const pathMatch = attrString.match(/filePath="([^"]*)"/);
+
+    const type = typeMatch ? typeMatch[1] : 'file';
+    const filePath = pathMatch ? pathMatch[1] : undefined;
 
     if (type === 'file') {
       steps.push({
         id: stepId++,
         title: `Create ${filePath || 'file'}`,
-        description: `File ${filePath} created`,
+        description: `File ${filePath || 'file'} created`,
         type: StepType.CreateFile,
         status: 'completed',
         code: content.trim(),
@@ -74,10 +80,16 @@ export function parseXml(response: string, isStreamingComplete: boolean = false)
 
   // Check if there is an active in-progress boltAction after the last completed action
   const remainingXml = xmlContent.slice(lastIndex);
-  const openActionMatch = remainingXml.match(/<boltAction\s+type="([^"]*)"(?:\s+filePath="([^"]*)")?>([\s\S]*)$/);
+  const openActionMatch = remainingXml.match(/<boltAction\s+([^>]+)>([\s\S]*)$/);
 
   if (openActionMatch && !isStreamingComplete) {
-    const [, type, filePath, partialContent] = openActionMatch;
+    const [, attrString, partialContent] = openActionMatch;
+
+    const typeMatch = attrString.match(/type="([^"]*)"/);
+    const pathMatch = attrString.match(/filePath="([^"]*)"/);
+
+    const type = typeMatch ? typeMatch[1] : 'file';
+    const filePath = pathMatch ? pathMatch[1] : undefined;
 
     if (type === 'file') {
       steps.push({
