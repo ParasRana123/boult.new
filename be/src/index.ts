@@ -206,12 +206,15 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
     });
   } catch (err: any) {
     console.error("Unexpected error in /chat:", err);
+    const isRateLimit = String(err?.message || "").includes("429") || String(err?.message || "").includes("quota") || String(err?.message || "").includes("Too Many Requests");
+    const statusCode = isRateLimit ? 429 : 500;
+
     if (res.headersSent) {
-      res.write(`data: ${JSON.stringify({ error: err?.message || String(err) })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: err?.message || String(err), isRateLimit })}\n\n`);
       res.end();
     } else {
-      res.status(500).json({
-        error: "Unexpected error occurred",
+      res.status(statusCode).json({
+        error: isRateLimit ? "Gemini API rate limit reached. Please wait a moment and try again." : "Unexpected error occurred",
         details: err?.message || String(err),
       });
     }
