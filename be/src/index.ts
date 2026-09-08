@@ -16,10 +16,27 @@ if (!GEMINI_API_KEY) {
 }
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// Request logging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+// Health check endpoint
+app.get("/health", (req: Request, res: Response): void => {
+  res.json({
+    status: "ok",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
+    timestamp: new Date().toISOString(),
+  });
+});
 
 app.post("/template", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -161,8 +178,8 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-app.listen(3000, () => {
-  console.log("Server listening on port 3000");
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
 });
 
 
