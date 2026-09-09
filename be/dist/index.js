@@ -18,8 +18,8 @@ function getGenAI() {
 const PORT = process.env.PORT || 3000;
 // High-performance candidate models pool with individual quota buckets
 const CANDIDATE_MODELS = [
-    "gemini-3.6-flash",
     "gemini-3.7-flash",
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
@@ -159,34 +159,49 @@ app.post("/chat", async (req, res) => {
             return;
         }
         if (isStreaming) {
-            const { streamResult, modelName } = await streamWithModelFailover(contents);
-            console.log(`[Gemini Stream] Successfully connected stream using model: ${modelName}`);
-            // Set SSE headers after stream initializes successfully
+            // Establish SSE stream immediately to avoid Vercel 504 Gateway Timeout
             res.setHeader("Content-Type", "text/event-stream");
-            res.setHeader("Cache-Control", "no-cache");
+            res.setHeader("Cache-Control", "no-cache, no-transform");
             res.setHeader("Connection", "keep-alive");
             res.setHeader("X-Accel-Buffering", "no");
             res.flushHeaders?.();
-            let fullResponse = "";
-            for await (const chunk of streamResult.stream) {
-                const chunkText = chunk.text();
-                if (chunkText) {
-                    fullResponse += chunkText;
-                    const payload = JSON.stringify({
-                        chunk: chunkText,
-                        choices: [
-                            {
-                                delta: { content: chunkText },
-                            },
-                        ],
-                    });
-                    res.write(`data: ${payload}\n\n`);
+            // Send initial handshake byte immediately so gateway response is finalized
+            res.write(": stream-init\n\n");
+            // Heartbeat to prevent edge proxy idle timeout while Gemini prepares output
+            const heartbeat = setInterval(() => {
+                if (!res.writableEnded) {
+                    res.write(": keep-alive\n\n");
                 }
+            }, 2500);
+            try {
+                const { streamResult, modelName } = await streamWithModelFailover(contents);
+                console.log(`[Gemini Stream] Successfully connected stream using model: ${modelName}`);
+                let fullResponse = "";
+                for await (const chunk of streamResult.stream) {
+                    const chunkText = chunk.text();
+                    if (chunkText) {
+                        fullResponse += chunkText;
+                        const payload = JSON.stringify({
+                            chunk: chunkText,
+                            choices: [
+                                {
+                                    delta: { content: chunkText },
+                                },
+                            ],
+                        });
+                        res.write(`data: ${payload}\n\n`);
+                    }
+                }
+                console.log(`[Gemini Stream] Finished stream from ${modelName}. Total length: ${fullResponse.length}`);
+                clearInterval(heartbeat);
+                res.write("data: [DONE]\n\n");
+                res.end();
+                return;
             }
-            console.log(`[Gemini Stream] Finished stream from ${modelName}. Total length: ${fullResponse.length}`);
-            res.write("data: [DONE]\n\n");
-            res.end();
-            return;
+            catch (streamErr) {
+                clearInterval(heartbeat);
+                throw streamErr;
+            }
         }
         // Non-streaming fallback with model failover
         let nonStreamResponse = "";
