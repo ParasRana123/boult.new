@@ -297,7 +297,8 @@ export function Builder() {
           setErrorMessage(`Gemini API free tier quota limit reached. Auto-resuming in ${waitTime} seconds...`);
           return;
         }
-        throw new Error(errJson?.error || `Server returned ${response.status}: ${response.statusText}`);
+        const errorMsg = errJson?.error || errJson?.details || `Server returned ${response.status}: ${response.statusText}`;
+        throw new Error(errorMsg);
       }
 
       if (!response.body) {
