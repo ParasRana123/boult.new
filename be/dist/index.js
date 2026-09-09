@@ -18,10 +18,12 @@ function getGenAI() {
 const PORT = process.env.PORT || 3000;
 // High-performance candidate models pool with individual quota buckets
 const CANDIDATE_MODELS = [
+    "gemini-3.6-flash",
     "gemini-3.7-flash",
     "gemini-3.5-flash",
-    "gemini-flash-latest",
-    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
 ];
 const app = express();
 app.use(express.json());
@@ -230,12 +232,25 @@ app.post("/chat", async (req, res) => {
             errMsg.includes("quota") ||
             errMsg.includes("Resource has been exhausted") ||
             errMsg.includes("Too Many Requests");
+        const isMissingKey = errMsg.includes("Missing GEMINI_API_KEY") || !process.env.GEMINI_API_KEY;
+        const isApiKeyInvalid = errMsg.includes("API key not valid") || errMsg.includes("API_KEY_INVALID");
         const retryDelay = isRateLimit ? extractRetryDelaySeconds(err) : 10;
         const statusCode = isRateLimit ? 429 : 500;
+        let userFriendlyError = "Unexpected error occurred during generation.";
+        if (isRateLimit) {
+            userFriendlyError = `Gemini API rate limit reached. All model pools exhausted. Auto-retry in ${retryDelay}s.`;
+        }
+        else if (isMissingKey) {
+            userFriendlyError = "Missing GEMINI_API_KEY in environment variables. Please configure GEMINI_API_KEY in Vercel Project Settings > Environment Variables, then redeploy.";
+        }
+        else if (isApiKeyInvalid) {
+            userFriendlyError = "Invalid GEMINI_API_KEY provided. Please check your API key in Google AI Studio and update it in Vercel Environment Variables.";
+        }
+        else if (errMsg) {
+            userFriendlyError = `Generation error: ${errMsg}`;
+        }
         const errorPayload = {
-            error: isRateLimit
-                ? `Gemini API rate limit reached. All model pools exhausted. Auto-retry in ${retryDelay}s.`
-                : "Unexpected error occurred during generation.",
+            error: userFriendlyError,
             details: errMsg,
             isRateLimit,
             retryDelay,
