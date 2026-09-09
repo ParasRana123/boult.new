@@ -18,9 +18,9 @@ function getGenAI() {
 const PORT = process.env.PORT || 3000;
 // High-performance candidate models pool with individual quota buckets
 const CANDIDATE_MODELS = [
-    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3.7-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
@@ -114,40 +114,41 @@ export function formatMessagesForGemini(messages) {
     return formatted;
 }
 /**
- * Execute Gemini Stream with Multi-Model Quota Failover Pool
+ * Execute Gemini Stream with Multi-Model Quota and Error Failover Pool
  */
-async function streamWithModelFailover(contents) {
+async function executeStreamWithFailover(contents, onChunk) {
     let lastError;
     const genAI = getGenAI();
     for (const modelName of CANDIDATE_MODELS) {
         try {
-            console.log(`[Gemini Stream] Requesting content with candidate: ${modelName}...`);
+            console.log(`[Gemini Stream] Connecting stream with candidate: ${modelName}...`);
             const model = genAI.getGenerativeModel({
                 model: modelName,
                 systemInstruction: getSystemPrompt(),
             });
             const streamResult = await model.generateContentStream({ contents });
-            return { streamResult, modelName };
+            let streamLength = 0;
+            for await (const chunk of streamResult.stream) {
+                const chunkText = chunk.text();
+                if (chunkText) {
+                    streamLength += chunkText.length;
+                    onChunk(chunkText);
+                }
+            }
+            if (streamLength > 0) {
+                console.log(`[Gemini Stream] Completed stream with ${modelName}. Output length: ${streamLength}`);
+                return { modelName, totalLength: streamLength };
+            }
         }
         catch (err) {
             lastError = err;
             const errMsg = String(err?.message || err);
-            const isQuotaOrTransient = errMsg.includes("429") ||
-                errMsg.includes("quota") ||
-                errMsg.includes("Resource has been exhausted") ||
-                errMsg.includes("Too Many Requests") ||
-                errMsg.includes("503") ||
-                errMsg.includes("404");
-            console.warn(`[Gemini Failover] Model ${modelName} encountered error: ${errMsg.slice(0, 150)}`);
-            if (isQuotaOrTransient) {
-                // Cascade to the next model in the candidate list
-                console.log(`[Gemini Failover] Quota exhausted for ${modelName}. Falling back to next available model in pool...`);
-                continue;
-            }
-            throw err;
+            console.warn(`[Gemini Stream Failover] Candidate ${modelName} encountered error: ${errMsg.slice(0, 160)}`);
+            console.log(`[Gemini Stream Failover] Cascading to next candidate model in pool...`);
+            continue;
         }
     }
-    throw lastError;
+    throw lastError || new Error("All candidate Gemini models in pool failed to stream response.");
 }
 app.post("/chat", async (req, res) => {
     try {
@@ -174,25 +175,18 @@ app.post("/chat", async (req, res) => {
                 }
             }, 2500);
             try {
-                const { streamResult, modelName } = await streamWithModelFailover(contents);
-                console.log(`[Gemini Stream] Successfully connected stream using model: ${modelName}`);
-                let fullResponse = "";
-                for await (const chunk of streamResult.stream) {
-                    const chunkText = chunk.text();
-                    if (chunkText) {
-                        fullResponse += chunkText;
-                        const payload = JSON.stringify({
-                            chunk: chunkText,
-                            choices: [
-                                {
-                                    delta: { content: chunkText },
-                                },
-                            ],
-                        });
-                        res.write(`data: ${payload}\n\n`);
-                    }
-                }
-                console.log(`[Gemini Stream] Finished stream from ${modelName}. Total length: ${fullResponse.length}`);
+                const { modelName, totalLength } = await executeStreamWithFailover(contents, (chunkText) => {
+                    const payload = JSON.stringify({
+                        chunk: chunkText,
+                        choices: [
+                            {
+                                delta: { content: chunkText },
+                            },
+                        ],
+                    });
+                    res.write(`data: ${payload}\n\n`);
+                });
+                console.log(`[Gemini Stream] Finished stream from ${modelName}. Total length: ${totalLength}`);
                 clearInterval(heartbeat);
                 res.write("data: [DONE]\n\n");
                 res.end();
