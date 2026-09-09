@@ -1,0 +1,25 @@
+{
+  "name": "boult-fullstack",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "build:be": "cd be && npm install && npm run build",
+    "build:all": "cd be && npm install && npm run build && cd ../frontend && npm install && npm run build"
+  },
+  "dependencies": {
+    "@google/genai": "^0.14.1",
+    "@google/generative-ai": "^0.24.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.18",
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.18",
+    "typescript": "^5.8.3"
+  }
+}

@@ -10,11 +10,14 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 config();
 const GEMINI_API_KEY: string = process.env.GEMINI_API_KEY || "";
 
-if (!GEMINI_API_KEY) {
-  throw new Error("Missing GEMINI_API_KEY in environment variables.");
+function getGenAI(): GoogleGenerativeAI {
+  const key = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("Missing GEMINI_API_KEY in environment variables.");
+  }
+  return new GoogleGenerativeAI(key);
 }
 
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const PORT = process.env.PORT || 3000;
 
 // High-performance candidate models pool with individual quota buckets
@@ -144,6 +147,7 @@ export function formatMessagesForGemini(messages: ChatMessage[]): GeminiContent[
 async function streamWithModelFailover(contents: GeminiContent[]) {
   let lastError: any;
 
+  const genAI = getGenAI();
   for (const modelName of CANDIDATE_MODELS) {
     try {
       console.log(`[Gemini Stream] Requesting content with candidate: ${modelName}...`);
@@ -229,6 +233,7 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
     let usedModel = "";
     let lastErr: any;
 
+    const genAI = getGenAI();
     for (const modelName of CANDIDATE_MODELS) {
       try {
         const model = genAI.getGenerativeModel({
@@ -290,31 +295,36 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
-
-server.on("error", (err: any) => {
-  if (err.code === "EADDRINUSE") {
-    console.error(`\n❌ Error: Port ${PORT} is already in use by another process.`);
-    console.error(`To resolve this:\n1. Stop the process currently running on port ${PORT}\n2. Or set a different port in your .env (e.g. PORT=3001)\n`);
-  } else {
-    console.error("Server error:", err);
-  }
-  process.exit(1);
-});
-
-// Clean shutdown listeners
-process.on("SIGINT", () => {
-  console.log("\nShutting down server gracefully...");
-  server.close(() => {
-    process.exit(0);
+if (!process.env.VERCEL) {
+  const server = app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
   });
-});
 
-process.on("SIGTERM", () => {
-  console.log("\nShutting down server gracefully...");
-  server.close(() => {
-    process.exit(0);
+  server.on("error", (err: any) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`\n❌ Error: Port ${PORT} is already in use by another process.`);
+      console.error(`To resolve this:\n1. Stop the process currently running on port ${PORT}\n2. Or set a different port in your .env (e.g. PORT=3001)\n`);
+    } else {
+      console.error("Server error:", err);
+    }
+    process.exit(1);
   });
-});
+
+  // Clean shutdown listeners
+  process.on("SIGINT", () => {
+    console.log("\nShutting down server gracefully...");
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+
+  process.on("SIGTERM", () => {
+    console.log("\nShutting down server gracefully...");
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+}
+
+export { app };
+export default app;

@@ -1,0 +1,25 @@
+{
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/chat", "destination": "/api/index" },
+    { "source": "/template", "destination": "/api/index" },
+    { "source": "/health", "destination": "/api/index" },
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/((?!api|template|chat|health).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" }
+      ]
+    }
+  ]
+}
