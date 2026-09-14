@@ -22,7 +22,7 @@ export function useSyncUser() {
       return;
     }
 
-    const syncUserToDatabase = async () => {
+    const syncUserToDatabase = async (attempt = 1) => {
       try {
         setIsSyncing(true);
         setError(null);
@@ -35,24 +35,45 @@ export function useSyncUser() {
           imageUrl: user.imageUrl || '',
         };
 
-        if (BACKEND_URL) {
-          await axios.post(`${BACKEND_URL}/api/users/sync`, payload);
-        } else {
-          await axios.post('/api/users/sync', payload);
-        }
+        const targetUrl = BACKEND_URL
+          ? `${BACKEND_URL.replace(/\/+$/, '')}/api/users/sync`
+          : '/api/users/sync';
 
-        syncedUserIdRef.current = clerkId;
-        setIsSynced(true);
-        console.log('[Auth] User successfully synced with database:', email);
+        const response = await axios.post(targetUrl, payload, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000,
+        });
+
+        if (response.data?.success) {
+          syncedUserIdRef.current = clerkId;
+          setIsSynced(true);
+          console.log('[Auth] User successfully synced with Neon PostgreSQL:', email);
+        }
       } catch (err: any) {
-        console.error('[Auth Sync Error]:', err);
-        setError(err?.message || 'Failed to sync user with database');
+        const errorDetail =
+          err.response?.data?.details ||
+          err.response?.data?.error ||
+          err.message ||
+          'Failed to sync user with database';
+
+        console.error(`[Auth Sync Error] Attempt ${attempt} failed:`, errorDetail);
+        setError(errorDetail);
+
+        // Auto-retry up to 3 attempts with exponential backoff for cold starts
+        if (attempt < 3 && syncedUserIdRef.current !== clerkId) {
+          const delay = attempt * 1500;
+          setTimeout(() => {
+            syncUserToDatabase(attempt + 1);
+          }, delay);
+        }
       } finally {
         setIsSyncing(false);
       }
     };
 
-    syncUserToDatabase();
+    syncUserToDatabase(1);
   }, [isLoaded, isSignedIn, user]);
 
   return { isLoaded, isSignedIn, user, isSynced, isSyncing, error };
