@@ -11,7 +11,9 @@ import { BACKEND_URL } from '../config';
 import { parseXml } from '../steps';
 import { useWebContainer } from '../hooks/useWebContainer';
 import { Loader } from '../components/Loader';
-import { AlertCircle, RefreshCw, Send, Sparkles, ArrowLeft, Terminal, Clock } from 'lucide-react';
+import { AlertCircle, RefreshCw, Send, Sparkles, ArrowLeft, Terminal, Clock, LogIn } from 'lucide-react';
+import { SignInButton, UserButton, SignedIn, SignedOut } from '@clerk/clerk-react';
+import { useSyncUser } from '../hooks/useSyncUser';
 
 function applyStepsToFiles(existingFiles: FileItem[], stepsToApply: Step[]): FileItem[] {
   const rootFiles: FileItem[] = JSON.parse(JSON.stringify(existingFiles));
@@ -97,6 +99,7 @@ export function Builder() {
   const location = useLocation();
   const navigate = useNavigate();
   const { prompt } = (location.state as { prompt: string }) || { prompt: "React application" };
+  const { user } = useSyncUser();
   const [userPrompt, setPrompt] = useState("");
   const [llmMessages, setLlmMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -618,6 +621,32 @@ export function Builder() {
               <span>AI Streaming Active</span>
             </div>
           )}
+
+          {/* Clerk Auth controls */}
+          <SignedOut>
+            <SignInButton mode="modal">
+              <button className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-gray-800 hover:bg-gray-750 text-gray-300 hover:text-white border border-gray-700/80 text-xs font-medium transition-colors">
+                <LogIn className="w-3.5 h-3.5 text-purple-400" />
+                <span>Sign In</span>
+              </button>
+            </SignInButton>
+          </SignedOut>
+
+          <SignedIn>
+            <div className="flex items-center gap-2 bg-gray-900 border border-gray-800 pl-2.5 pr-1 py-1 rounded-full">
+              <span className="text-xs text-gray-300 font-medium hidden sm:inline">
+                {user?.firstName || user?.username || 'Creator'}
+              </span>
+              <UserButton
+                afterSignOutUrl="/"
+                appearance={{
+                  elements: {
+                    avatarBox: 'w-6 h-6 ring-2 ring-purple-500/40',
+                  },
+                }}
+              />
+            </div>
+          </SignedIn>
         </div>
       </header>
 

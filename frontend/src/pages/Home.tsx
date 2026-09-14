@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wand2, Sparkles, ArrowRight, Code, Layers, Zap } from 'lucide-react';
+import { Sparkles, ArrowRight, Code, Zap, LogIn, UserPlus } from 'lucide-react';
+import {
+  SignInButton,
+  SignUpButton,
+  UserButton,
+  SignedIn,
+  SignedOut,
+} from '@clerk/clerk-react';
+import { useSyncUser } from '../hooks/useSyncUser';
 
 const SUGGESTIONS = [
   "Todo app with Kanban board and priority Eisenhower matrix",
@@ -12,6 +20,7 @@ const SUGGESTIONS = [
 export function Home() {
   const [prompt, setPrompt] = useState('');
   const navigate = useNavigate();
+  const { user } = useSyncUser();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,10 +50,46 @@ export function Home() {
           </span>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-gray-400 font-mono">
-          <span className="px-2.5 py-1 rounded-full bg-gray-900 border border-gray-800 text-purple-300">
-            ⚡ Powered by Gemini 3.6 Flash
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400 font-mono">
+            <span className="px-2.5 py-1 rounded-full bg-gray-900 border border-gray-800 text-purple-300">
+              ⚡ Powered by Gemini 3.6 Flash
+            </span>
+          </div>
+
+          {/* Clerk Auth Navigation Buttons */}
+          <SignedOut>
+            <div className="flex items-center gap-2">
+              <SignInButton mode="modal">
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 text-gray-300 hover:text-white border border-gray-700/80 text-xs font-medium transition-colors shadow-sm">
+                  <LogIn className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Sign In</span>
+                </button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-medium transition-all shadow-md shadow-purple-900/30">
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Sign Up</span>
+                </button>
+              </SignUpButton>
+            </div>
+          </SignedOut>
+
+          <SignedIn>
+            <div className="flex items-center gap-2.5 bg-gray-900/90 border border-gray-800/90 pl-3 pr-1.5 py-1 rounded-full shadow-sm">
+              <span className="text-xs text-gray-300 font-medium">
+                {user?.firstName || user?.username || 'Creator'}
+              </span>
+              <UserButton
+                afterSignOutUrl="/"
+                appearance={{
+                  elements: {
+                    avatarBox: 'w-7 h-7 ring-2 ring-purple-500/40',
+                  },
+                }}
+              />
+            </div>
+          </SignedIn>
         </div>
       </header>
 
@@ -55,6 +100,14 @@ export function Home() {
             <Sparkles className="w-3.5 h-3.5 text-purple-400" />
             <span>AI Full-Stack Streaming IDE</span>
           </div>
+
+          <SignedIn>
+            {user?.firstName && (
+              <p className="text-xs font-mono text-purple-300 uppercase tracking-widest mb-2 font-semibold">
+                Welcome back, {user.firstName}
+              </p>
+            )}
+          </SignedIn>
 
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white mb-4 leading-tight">
             What do you want to <br className="hidden sm:block" />
