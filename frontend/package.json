@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.3",
     "@monaco-editor/react": "^4.6.0",
     "@types/xml2js": "^0.4.14",
     "@webcontainer/api": "^1.5.1",
