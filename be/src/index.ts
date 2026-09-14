@@ -5,6 +5,7 @@ import { basePrompt as nodeBasePrompt } from "./defaults/node.js";
 import { basePrompt as reactBasePrompt } from "./defaults/react.js";
 import cors from 'cors';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import prisma from "./db.js";
 
 // Load environment variables
 config();
@@ -54,13 +55,89 @@ function extractRetryDelaySeconds(err: any): number {
 }
 
 // Health check endpoint
-app.get("/health", (req: Request, res: Response): void => {
+app.get("/health", async (req: Request, res: Response): Promise<void> => {
+  let dbStatus = "connected";
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch (dbErr: any) {
+    dbStatus = `disconnected: ${dbErr?.message || dbErr}`;
+  }
+
   res.json({
     status: "ok",
     provider: "gemini",
+    database: dbStatus,
     models: CANDIDATE_MODELS,
     timestamp: new Date().toISOString(),
   });
+});
+
+/**
+ * Sync / Upsert Clerk user details into PostgreSQL
+ */
+app.post("/api/users/sync", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { clerkId, email, firstName, lastName, imageUrl } = req.body;
+
+    if (!clerkId || !email) {
+      res.status(400).json({ error: "clerkId and email are required fields." });
+      return;
+    }
+
+    const user = await prisma.user.upsert({
+      where: { clerkId },
+      update: {
+        email,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        imageUrl: imageUrl || null,
+        lastLoginAt: new Date(),
+      },
+      create: {
+        clerkId,
+        email,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        imageUrl: imageUrl || null,
+        lastLoginAt: new Date(),
+      },
+    });
+
+    console.log(`[Auth Sync] Successfully synced user profile: ${clerkId} (${email})`);
+    res.json({ success: true, user });
+  } catch (err: any) {
+    console.error("[Auth Sync Error]:", err);
+    res.status(500).json({
+      error: "Failed to sync user details to database.",
+      details: err?.message || String(err),
+    });
+  }
+});
+
+/**
+ * Retrieve user profile from PostgreSQL
+ */
+app.get("/api/users/:clerkId", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const clerkIdParam = req.params.clerkId;
+    const clerkId = Array.isArray(clerkIdParam) ? clerkIdParam[0] : clerkIdParam;
+    const user = await prisma.user.findUnique({
+      where: { clerkId },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: "User not found." });
+      return;
+    }
+
+    res.json({ success: true, user });
+  } catch (err: any) {
+    console.error("[Get User Error]:", err);
+    res.status(500).json({
+      error: "Failed to fetch user profile.",
+      details: err?.message || String(err),
+    });
+  }
 });
 
 /**
