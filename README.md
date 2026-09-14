@@ -6,6 +6,8 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
 
 ## Key Features
 
+- **Authentication & User Management**: Integrated **Clerk Authentication** with seamless sign-in, sign-up, user profiles, and session management.
+- **Persistent Database with Prisma ORM**: Cloud-hosted **Neon PostgreSQL** database storing registered users and login activity via **Prisma ORM**.
 - **In-Browser Containerized Runtime**: Leverages the WebContainers API to run Node.js, Vite dev servers, and package installations directly in the browser with zero remote container overhead.
 - **Multi-Model AI Failover Pool**: Integrates Google Gemini models with automatic iterator-level failover across candidate models to maintain uninterrupted streaming under rate limits or transient high-demand spikes.
 - **Real-Time Token Streaming**: Server-Sent Events (SSE) streaming infrastructure with instant HTTP handshake and proxy keep-alive heartbeats.
@@ -27,26 +29,30 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
                         v                                           v
          +-----------------------------+             +-----------------------------+
          |    React / Vite Frontend    |             |    WebContainer Runtime     |
-         |  - Monaco Code Editor       |             |  - In-browser Node.js       |
-         |  - File Explorer & Tabs     |<----------->|  - Vite Dev Server          |
-         |  - SSE Event Stream Reader  |             |  - Sandboxed Preview Frame  |
-         +--------------+--------------+             +-----------------------------+
+         |  - Clerk Authentication     |             |  - In-browser Node.js       |
+         |  - Monaco Code Editor       |<----------->|  - Vite Dev Server          |
+         |  - File Explorer & Tabs     |             |  - Sandboxed Preview Frame  |
+         |  - SSE Event Stream Reader  |             +-----------------------------+
+         +--------------+--------------+
                         |
-                        v (HTTPS / SSE)
+                        v (HTTPS / SSE / REST)
          +-----------------------------+
          |  Express.js Backend / API   |
          |  - /template Classifier     |
          |  - /chat SSE Streamer       |
-         |  - Multi-Model Pool Manager |
+         |  - /api/users Auth Sync     |
+         |  - Prisma ORM Client        |
          +--------------+--------------+
                         |
-                        v
-         +-----------------------------+
-         |   Google Gemini AI API      |
-         |  - gemini-3.6-flash         |
-         |  - gemini-3.5-flash         |
-         |  - gemini-3.7-flash         |
-         +-----------------------------+
+            +-----------+-----------+
+            |                       |
+            v                       v
++-----------------------+   +-----------------------+
+|  Google Gemini AI     |   |  Neon PostgreSQL DB   |
+|  - gemini-3.6-flash   |   |  - users table        |
+|  - gemini-3.5-flash   |   |  - login metadata     |
+|  - gemini-3.7-flash   |   +-----------------------+
++-----------------------+
 ```
 
 ---
@@ -55,6 +61,7 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
 
 ### Frontend
 - **Framework**: React 18 with TypeScript
+- **Authentication**: Clerk (`@clerk/clerk-react`)
 - **Bundler / Dev Server**: Vite
 - **Styling**: Tailwind CSS
 - **Code Editor**: Monaco Editor (`@monaco-editor/react`)
@@ -65,9 +72,31 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
 ### Backend
 - **Runtime**: Node.js (ES Modules)
 - **Framework**: Express.js
+- **Database ORM**: Prisma ORM (`@prisma/client`, `prisma`)
+- **Database**: PostgreSQL (Neon Serverless Postgres)
 - **Language**: TypeScript
 - **AI SDK**: `@google/generative-ai`
 - **Protocol**: Server-Sent Events (SSE) with keep-alive heartbeat
+
+---
+
+## Database Schema (Prisma)
+
+```prisma
+model User {
+  id          String   @id @default(uuid())
+  clerkId     String   @unique
+  email       String
+  firstName   String?
+  lastName    String?
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastLoginAt DateTime @default(now())
+
+  @@map("users")
+}
+```
 
 ---
 
@@ -78,10 +107,13 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
 ├── api/
 │   └── index.ts                 # Serverless entry point for unified hosting
 ├── be/                          # Backend Express service
+│   ├── prisma/
+│   │   └── schema.prisma        # Prisma ORM schema definition
 │   ├── src/
+│   │   ├── db.ts                # Prisma client singleton
 │   │   ├── defaults/            # Project template definitions (Node & React)
 │   │   ├── constants.ts         # System constants and allowed HTML tags
-│   │   ├── index.ts             # Express server and streaming failover logic
+│   │   ├── index.ts             # Express server, user sync, and streaming failover
 │   │   ├── prompts.ts           # System prompts and artifact format specifications
 │   │   └── stripindents.ts      # Template string formatting utilities
 │   ├── package.json
@@ -89,7 +121,7 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
 ├── frontend/                    # React Vite client application
 │   ├── src/
 │   │   ├── components/          # UI components (Editor, Preview, Explorer, Steps)
-│   │   ├── hooks/               # Custom hooks (useWebContainer)
+│   │   ├── hooks/               # Custom hooks (useWebContainer, useSyncUser)
 │   │   ├── pages/               # Application routes (Home, Builder)
 │   │   ├── config.ts            # Dynamic environment configuration
 │   │   ├── steps.ts             # XML parsing and step execution utilities
@@ -114,6 +146,8 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
 - Node.js (v18.0.0 or higher recommended)
 - npm (v9.0.0 or higher)
 - Google Gemini API Key (obtained from Google AI Studio)
+- Clerk Publishable Key (obtained from Clerk Dashboard)
+- PostgreSQL Database URL (e.g. Neon PostgreSQL)
 
 ### Installation
 
@@ -136,10 +170,25 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
    ```
 
 3. Configure Environment Variables:
-   Create a `.env` file inside the `be/` directory:
+   
+   Create `be/.env`:
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
    PORT=3000
+   DATABASE_URL=postgresql://user:password@host/neondb?sslmode=require
+   ```
+
+   Create `frontend/.env`:
+   ```env
+   VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+   VITE_BACKEND_URL=http://localhost:3000
+   ```
+
+4. Push Prisma Database Schema:
+   ```bash
+   cd be
+   npx prisma db push
+   cd ..
    ```
 
 ### Running Locally
