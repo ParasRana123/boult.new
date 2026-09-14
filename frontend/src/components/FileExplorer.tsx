@@ -6,6 +6,7 @@ interface FileExplorerProps {
   files: FileItem[];
   selectedFile?: FileItem | null;
   onFileSelect: (file: FileItem) => void;
+  originalFilesMap?: Record<string, string>;
 }
 
 interface FileNodeProps {
@@ -13,11 +14,17 @@ interface FileNodeProps {
   depth: number;
   selectedFile?: FileItem | null;
   onFileClick: (file: FileItem) => void;
+  originalFilesMap?: Record<string, string>;
 }
 
-function FileNode({ item, depth, selectedFile, onFileClick }: FileNodeProps) {
+function FileNode({ item, depth, selectedFile, onFileClick, originalFilesMap }: FileNodeProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const isSelected = selectedFile && selectedFile.path === item.path;
+  const isModified =
+    item.type === 'file' &&
+    originalFilesMap !== undefined &&
+    originalFilesMap[item.path] !== undefined &&
+    originalFilesMap[item.path] !== item.content;
 
   // Automatically expand parent folder if selected/active file is inside it
   useEffect(() => {
@@ -65,7 +72,13 @@ function FileNode({ item, depth, selectedFile, onFileClick }: FileNodeProps) {
         ) : (
           <FileCode className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-purple-300' : 'text-blue-400'}`} />
         )}
-        <span className="truncate">{item.name}</span>
+        <span className="truncate flex-1">{item.name}</span>
+        {isModified && (
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"
+            title="Modified by you"
+          />
+        )}
       </div>
       {item.type === 'folder' && isExpanded && item.children && (
         <div className="space-y-0.5">
@@ -76,6 +89,7 @@ function FileNode({ item, depth, selectedFile, onFileClick }: FileNodeProps) {
               depth={depth + 1}
               selectedFile={selectedFile}
               onFileClick={onFileClick}
+              originalFilesMap={originalFilesMap}
             />
           ))}
         </div>
@@ -84,7 +98,12 @@ function FileNode({ item, depth, selectedFile, onFileClick }: FileNodeProps) {
   );
 }
 
-export function FileExplorer({ files, selectedFile, onFileSelect }: FileExplorerProps) {
+export function FileExplorer({
+  files,
+  selectedFile,
+  onFileSelect,
+  originalFilesMap,
+}: FileExplorerProps) {
   return (
     <div className="bg-gray-900 rounded-lg shadow-lg p-4 h-full overflow-auto border border-gray-800 flex flex-col">
       <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-800">
@@ -107,6 +126,7 @@ export function FileExplorer({ files, selectedFile, onFileSelect }: FileExplorer
               depth={0}
               selectedFile={selectedFile}
               onFileClick={onFileSelect}
+              originalFilesMap={originalFilesMap}
             />
           ))
         )}

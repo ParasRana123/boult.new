@@ -756,6 +756,7 @@ export function Builder() {
             <FileExplorer 
               files={files} 
               selectedFile={selectedFile}
+              originalFilesMap={originalFilesMap}
               onFileSelect={(file) => {
                 setSelectedFile(file);
                 setActiveTab('code');

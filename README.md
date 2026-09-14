@@ -9,8 +9,8 @@ Boult.new is an AI-powered full-stack web application builder and in-browser dev
 - **In-Browser Containerized Runtime**: Leverages the WebContainers API to run Node.js, Vite dev servers, and package installations directly in the browser with zero remote container overhead.
 - **Multi-Model AI Failover Pool**: Integrates Google Gemini models with automatic iterator-level failover across candidate models to maintain uninterrupted streaming under rate limits or transient high-demand spikes.
 - **Real-Time Token Streaming**: Server-Sent Events (SSE) streaming infrastructure with instant HTTP handshake and proxy keep-alive heartbeats.
-- **Interactive Development Workspace**: Integrated Monaco Editor featuring syntax highlighting, multi-tab file navigation, and live project tree visualization.
-- **Instant Live Preview**: Embedded sandboxed iframe reflecting code changes and running dev servers in real time.
+- **Interactive & Editable Monaco Workspace**: Full interactive code editor allowing users to edit generated files directly after AI generation completes, featuring syntax highlighting, multi-tab file navigation, live project tree visualization, and one-click code copy.
+- **Instant Live Preview with HMR**: Sandboxed iframe with direct WebContainer filesystem syncing for sub-second Vite Hot Module Replacement (HMR) as you code, plus instant revert to AI-generated snapshots.
 - **Unified Full-Stack Deployment**: Configured for single-project monorepo deployment on modern serverless hosting platforms.
 
 ---
