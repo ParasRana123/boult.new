@@ -74,6 +74,21 @@ function findFileByPath(files: FileItem[], path: string): FileItem | null {
   return null;
 }
 
+function updateFileContentInTree(fileList: FileItem[], targetPath: string, newContent: string): FileItem[] {
+  return fileList.map(item => {
+    if (item.path === targetPath && item.type === 'file') {
+      return { ...item, content: newContent };
+    }
+    if (item.type === 'folder' && item.children) {
+      return {
+        ...item,
+        children: updateFileContentInTree(item.children, targetPath, newContent),
+      };
+    }
+    return item;
+  });
+}
+
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -99,7 +114,9 @@ export function Builder() {
 
   const [steps, setSteps] = useState<Step[]>([]);
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [originalFilesMap, setOriginalFilesMap] = useState<Record<string, string>>({});
   const allCompletedStepsRef = useRef<Step[]>([]);
+  const writeDebounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Keep track of active file path
   useEffect(() => {
@@ -246,6 +263,10 @@ export function Builder() {
         const finalFile = findFileByPath(currentFiles, normalizedPath);
         if (finalFile) {
           setSelectedFile(finalFile);
+          setOriginalFilesMap(prev => ({
+            ...prev,
+            [normalizedPath]: fullCode,
+          }));
         }
       } else {
         await sleep(60);
@@ -419,6 +440,18 @@ export function Builder() {
       const finalFiles = applyStepsToFiles([], finalAllSteps);
       setFiles(finalFiles);
 
+      // Snapshot original AI-generated code for each file
+      setOriginalFilesMap(prev => {
+        const updated = { ...prev };
+        finalAllSteps.forEach(s => {
+          if (s.type === StepType.CreateFile && s.path && s.code) {
+            const normPath = s.path.startsWith('/') ? s.path : `/${s.path}`;
+            updated[normPath] = s.code;
+          }
+        });
+        return updated;
+      });
+
       // Keep last edited file selected or select first file
       if (lastActivePath) {
         const lastFile = findFileByPath(finalFiles, lastActivePath);
@@ -488,6 +521,55 @@ export function Builder() {
   useEffect(() => {
     init();
   }, []);
+
+  const handleFileContentChange = (filePath: string, newContent: string) => {
+    // 1. Update file content in files hierarchy
+    setFiles(prevFiles => updateFileContentInTree(prevFiles, filePath, newContent));
+
+    // 2. Update selectedFile if active
+    setSelectedFile(prev => (prev && prev.path === filePath ? { ...prev, content: newContent } : prev));
+
+    // 3. Keep steps in sync
+    const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
+    setSteps(prevSteps =>
+      prevSteps.map(step => {
+        if (step.path && (step.path === normalizedPath || step.path === filePath || `/${step.path}` === filePath)) {
+          return { ...step, code: newContent };
+        }
+        return step;
+      })
+    );
+
+    // 4. Keep completed steps reference in sync
+    allCompletedStepsRef.current = allCompletedStepsRef.current.map(step => {
+      if (step.path && (step.path === normalizedPath || step.path === filePath || `/${step.path}` === filePath)) {
+        return { ...step, code: newContent };
+      }
+      return step;
+    });
+
+    // 5. Sync to WebContainer filesystem for instant Vite HMR live reload
+    if (webcontainer) {
+      if (writeDebounceTimers.current[filePath]) {
+        clearTimeout(writeDebounceTimers.current[filePath]);
+      }
+      writeDebounceTimers.current[filePath] = setTimeout(async () => {
+        try {
+          const relativeFsPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
+          await webcontainer.fs.writeFile(relativeFsPath, newContent);
+        } catch (err) {
+          console.warn('WebContainer live write sync:', err);
+        }
+      }, 150);
+    }
+  };
+
+  const handleRevertFile = (filePath: string) => {
+    const originalContent = originalFilesMap[filePath];
+    if (originalContent !== undefined) {
+      handleFileContentChange(filePath, originalContent);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col antialiased selection:bg-purple-900 selection:text-purple-200">
@@ -686,7 +768,13 @@ export function Builder() {
             <TabView activeTab={activeTab} onTabChange={setActiveTab} />
             <div className="flex-1 min-h-0">
               {activeTab === 'code' ? (
-                <CodeEditor file={selectedFile} isWriting={isWritingCode} />
+                <CodeEditor
+                  file={selectedFile}
+                  isWriting={isWritingCode}
+                  onChange={handleFileContentChange}
+                  originalContent={selectedFile ? originalFilesMap[selectedFile.path] : undefined}
+                  onRevert={handleRevertFile}
+                />
               ) : (
                 <PreviewFrame webContainer={webcontainer} files={files} />
               )}
